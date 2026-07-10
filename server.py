@@ -22,7 +22,6 @@ app.add_middleware(
     expose_headers=["mcp-session-id"],
 )
 
-# ---- Корневой маршрут для health check ----
 async def root(request):
     return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter"})
 
@@ -34,23 +33,29 @@ XIAOZHI_WS_URL = os.getenv("XIAOZHI_WS_URL", "wss://api.tenclass.net/xiaozhi/v1/
 XIAOZHI_TOKEN = os.getenv("XIAOZHI_TOKEN", "")
 if not XIAOZHI_TOKEN:
     print("⚠️  ВНИМАНИЕ: XIAOZHI_TOKEN не задан!")
+else:
+    print(f"✅ XIAOZHI_TOKEN загружен: {XIAOZHI_TOKEN[:10]}...")
 
 DEVICE_ID = os.getenv("DEVICE_ID", "e0:2e:0b:ae:79:ea")
 CLIENT_ID = os.getenv("CLIENT_ID", "9cc3e5e4-adcf-4eff-8d23-95d4eaa21020")
 
+print(f"📱 Device ID: {DEVICE_ID}")
+print(f"📱 Client ID: {CLIENT_ID}")
+
 async def send_to_xiaozhi(message: str) -> str:
+    print(f"📨 send_to_xiaozhi called with: {message}")
     headers = {
         "Device-Id": DEVICE_ID,
         "Client-Id": CLIENT_ID,
         "Protocol-Version": "1",
     }
     ws_url = f"{XIAOZHI_WS_URL}?token={XIAOZHI_TOKEN}"
+    print(f"🔗 Connecting to: {ws_url[:50]}...")
 
     try:
-        # Универсальный способ: преобразуем словарь в список кортежей
         headers_list = list(headers.items())
-        # Для некоторых версий нужно передавать extra_headers именно как список кортежей
         async with websockets.connect(ws_url, extra_headers=headers_list) as websocket:
+            print("✅ WebSocket connected to Xiaozhi")
             hello = {
                 "type": "hello",
                 "version": 1,
@@ -63,15 +68,18 @@ async def send_to_xiaozhi(message: str) -> str:
                 }
             }
             await websocket.send(json.dumps(hello))
+            print("📤 Hello sent")
 
             try:
                 resp = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                print(f"📩 Received: {resp[:100]}...")
                 data = json.loads(resp)
                 if data.get("type") != "hello":
                     return f"Ошибка: ожидался hello, получено {data.get('type')}"
                 session_id = data.get("session_id")
                 if not session_id:
                     return "Ошибка: не получен session_id"
+                print(f"✅ Получен session_id: {session_id}")
             except asyncio.TimeoutError:
                 return "⏰ Таймаут: сервер не ответил на hello"
             except Exception as e:
@@ -84,14 +92,17 @@ async def send_to_xiaozhi(message: str) -> str:
                 "source": "text"
             }
             await websocket.send(json.dumps(text_msg))
+            print("📤 Text message sent")
 
             full_reply = ""
             while True:
                 raw = await websocket.recv()
                 if isinstance(raw, bytes):
+                    print("📩 Бинарные данные (аудио) пропущены")
                     continue
                 try:
                     data = json.loads(raw)
+                    print(f"📩 JSON: {data}")
                 except json.JSONDecodeError:
                     continue
                 msg_type = data.get("type")
@@ -108,13 +119,16 @@ async def send_to_xiaozhi(message: str) -> str:
                         break
                 elif msg_type == "error":
                     return f"Ошибка от Xiaozhi: {data.get('message', 'неизвестная')}"
+            print(f"✅ Full reply: {full_reply[:100]}...")
             return full_reply if full_reply else "Ответ не получен"
 
     except Exception as e:
+        print(f"❌ Ошибка подключения к Xiaozhi: {e}")
         return f"❌ Ошибка подключения к Xiaozhi: {e}"
 
 @mcp.tool()
 def send_message(message: str) -> str:
+    print(f"🔧 send_message вызван с: {message}")
     return asyncio.run(send_to_xiaozhi(message))
 
 if __name__ == "__main__":
