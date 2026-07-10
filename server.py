@@ -141,7 +141,7 @@ async def send_to_xiaozhi(message: str) -> str:
         print(f"❌ Ошибка подключения к Xiaozhi: {e}")
         return f"❌ Ошибка подключения к Xiaozhi: {e}"
 
-# ---- Явная регистрация инструментов (без декораторов) ----
+# ---- Регистрация инструментов (без ключевого аргумента name) ----
 def send_message_fn(message: str) -> str:
     print(f"🔧 send_message_fn вызван с: {message}")
     return asyncio.run(send_to_xiaozhi(message))
@@ -149,8 +149,8 @@ def send_message_fn(message: str) -> str:
 def ping_fn() -> str:
     return "pong"
 
-mcp.add_tool(send_message_fn, name="send_message")
-mcp.add_tool(ping_fn, name="ping")
+mcp.add_tool(send_message_fn)   # имя будет взято из имени функции
+mcp.add_tool(ping_fn)
 
 # ---- Диагностика зарегистрированных инструментов ----
 print("📋 Зарегистрированные инструменты:")
