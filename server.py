@@ -53,7 +53,7 @@ else:
     print(f"✅ XIAOZHI_TOKEN загружен: {XIAOZHI_TOKEN[:10]}...")
 
 DEVICE_ID = os.getenv("DEVICE_ID", "e0:2e:0b:ae:79:ea")
-CLIENT_ID = os.getenv("CLIENT_ID", "9cc3e5e4-adcf-4eff-8d23-95d4eaa21020")  # обязательно с 9 в начале!
+CLIENT_ID = os.getenv("CLIENT_ID", "9cc3e5e4-adcf-4eff-8d23-95d4eaa21020")
 print(f"📱 Device ID: {DEVICE_ID}")
 print(f"📱 Client ID: {CLIENT_ID}")
 
@@ -68,7 +68,6 @@ async def send_to_xiaozhi(message: str) -> str:
     print(f"🔗 Connecting to: {ws_url[:60]}...")
 
     try:
-        # Передаём заголовки как словарь (это работает во всех версиях websockets)
         async with websockets.connect(ws_url, extra_headers=headers) as websocket:
             print("✅ WebSocket connected to Xiaozhi")
             hello = {
@@ -141,15 +140,22 @@ async def send_to_xiaozhi(message: str) -> str:
         print(f"❌ Ошибка подключения к Xiaozhi: {e}")
         return f"❌ Ошибка подключения к Xiaozhi: {e}"
 
+# ---- Регистрация инструментов с помощью декоратора (Способ 1) ----
+@mcp.tool()
 def send_message_fn(message: str) -> str:
     print(f"🔧 send_message_fn вызван с: {message}")
     return asyncio.run(send_to_xiaozhi(message))
 
+@mcp.tool()
 def ping_fn() -> str:
     return "pong"
 
-mcp.add_tool(send_message_fn)
-mcp.add_tool(ping_fn)
+# ---- (Опционально) Вывод информации о зарегистрированных инструментах ----
+try:
+    tools = mcp.list_tools()
+    print(f"📋 Зарегистрированные инструменты: {tools}")
+except Exception as e:
+    print(f"⚠️ Не удалось получить список инструментов: {e}")
 
 print("✅ Инициализация завершена, запускаю сервер...")
 
