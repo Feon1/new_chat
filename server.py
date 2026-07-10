@@ -22,10 +22,8 @@ app.add_middleware(
     expose_headers=["mcp-session-id"],
 )
 
-# ---- Хранилище сессий ----
 sessions = {}
 
-# ---- Конфигурация Xiaozhi ----
 XIAOZHI_WS_URL = os.getenv("XIAOZHI_WS_URL", "wss://api.tenclass.net/xiaozhi/v1/")
 XIAOZHI_TOKEN = os.getenv("XIAOZHI_TOKEN", "")
 if not XIAOZHI_TOKEN:
@@ -137,7 +135,6 @@ async def send_to_xiaozhi(message: str) -> str:
         print(f"❌ Ошибка подключения к Xiaozhi: {e}")
         return f"❌ Ошибка подключения к Xiaozhi: {e}"
 
-# ---- Обработчик MCP-запросов (JSON-RPC) с поддержкой сессий ----
 @app.post("/mcp")
 async def mcp_handler(request: Request):
     try:
@@ -147,7 +144,6 @@ async def mcp_handler(request: Request):
         session_id = request.headers.get("mcp-session-id")
 
         if method == "initialize":
-            # Генерируем новый session-id
             new_session_id = str(uuid.uuid4()).replace("-", "")
             sessions[new_session_id] = {"active": True}
             response_data = {
@@ -163,7 +159,6 @@ async def mcp_handler(request: Request):
             response.headers["mcp-session-id"] = new_session_id
             return response
 
-        # Проверяем session-id для остальных методов
         if not session_id or session_id not in sessions:
             return JSONResponse({
                 "jsonrpc": "2.0",
@@ -178,14 +173,17 @@ async def mcp_handler(request: Request):
             if tool_name == "send_message":
                 message = arguments.get("message", "")
                 result_text = await send_to_xiaozhi(message)
-                return JSONResponse({
+                # Формируем SSE-ответ
+                sse_data = {
                     "jsonrpc": "2.0",
                     "id": body.get("id"),
                     "result": {
                         "content": [{"type": "text", "text": result_text}],
                         "structuredContent": {"result": result_text}
                     }
-                })
+                }
+                sse_body = f"event: message\ndata: {json.dumps(sse_data)}\n\n"
+                return Response(content=sse_body, media_type="text/event-stream")
             else:
                 return JSONResponse({
                     "jsonrpc": "2.0",
