@@ -4,6 +4,7 @@ import os
 import sys
 import websockets
 from fastmcp import FastMCP
+from fastmcp.tools import Tool
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse, Response
 from starlette.requests import Request
@@ -140,23 +141,22 @@ async def send_to_xiaozhi(message: str) -> str:
         print(f"❌ Ошибка подключения к Xiaozhi: {e}")
         return f"❌ Ошибка подключения к Xiaozhi: {e}"
 
-# ---- Регистрация инструментов с помощью декоратора (Способ 1) ----
-@mcp.tool()
-def send_message_fn(message: str) -> str:
-    print(f"🔧 send_message_fn вызван с: {message}")
+# ---- Явная регистрация инструмента с именем "send_message" ----
+def send_message_impl(message: str) -> str:
+    print(f"🔧 send_message_impl вызван с: {message}")
     return asyncio.run(send_to_xiaozhi(message))
 
-@mcp.tool()
-def ping_fn() -> str:
+send_message_tool = Tool.from_function(send_message_impl, name="send_message")
+mcp.add_tool(send_message_tool)
+
+# ---- Тестовый инструмент ----
+def ping_impl() -> str:
     return "pong"
 
-# ---- (Опционально) Вывод информации о зарегистрированных инструментах ----
-try:
-    tools = mcp.list_tools()
-    print(f"📋 Зарегистрированные инструменты: {tools}")
-except Exception as e:
-    print(f"⚠️ Не удалось получить список инструментов: {e}")
+ping_tool = Tool.from_function(ping_impl, name="ping")
+mcp.add_tool(ping_tool)
 
+print("✅ Инструменты зарегистрированы: send_message, ping")
 print("✅ Инициализация завершена, запускаю сервер...")
 
 if __name__ == "__main__":
