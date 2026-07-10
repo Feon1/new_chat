@@ -1,0 +1,5 @@
+fastmcp
+uvicorn
+websockets
+python-dotenv
+starlette
