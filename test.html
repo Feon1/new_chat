@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Тест адаптера</title>
+</head>
+<body>
+    <h2>Тест POST /mcp</h2>
+    <button onclick="test()">Отправить тестовый запрос</button>
+    <pre id="log">Ожидание...</pre>
+    <script>
+        const ADAPTER_URL = 'https://new-chat-adapter.onrender.com/mcp';
+
+        async function test() {
+            const log = document.getElementById('log');
+            log.textContent = '⏳ Отправка...\n';
+
+            try {
+                // 1. Инициализация
+                log.textContent += '1️⃣ Инициализация...\n';
+                const initRes = await fetch(ADAPTER_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json, text/event-stream'
+                    },
+                    body: JSON.stringify({
+                        jsonrpc: "2.0",
+                        id: 1,
+                        method: "initialize",
+                        params: {
+                            protocolVersion: "2024-11-05",
+                            capabilities: {},
+                            clientInfo: { name: "web-client", version: "1.0.0" }
+                        }
+                    })
+                });
+                log.textContent += `✅ Статус инициализации: ${initRes.status}\n`;
+                
+                const sessionId = initRes.headers.get('mcp-session-id');
+                if (!sessionId) {
+                    log.textContent += '❌ session-id не получен\n';
+                    return;
+                }
+                log.textContent += `✅ session-id: ${sessionId}\n`;
+
+                // 2. Вызов инструмента
+                log.textContent += '2️⃣ Вызов send_message...\n';
+                const callRes = await fetch(ADAPTER_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json, text/event-stream',
+                        'mcp-session-id': sessionId
+                    },
+                    body: JSON.stringify({
+                        jsonrpc: "2.0",
+                        id: 2,
+                        method: "tools/call",
+                        params: {
+                            name: "send_message",
+                            arguments: { message: "Привет, Xiaozhi!" }
+                        }
+                    })
+                });
+                log.textContent += `✅ Статус вызова: ${callRes.status}\n`;
+
+                const raw = await callRes.text();
+                log.textContent += `📩 Сырой ответ:\n${raw}\n`;
+
+                // Парсим SSE
+                const lines = raw.split('\n');
+                let jsonData = null;
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            jsonData = JSON.parse(line.substring(6).trim());
+                            break;
+                        } catch(e) {}
+                    }
+                }
+
+                if (jsonData) {
+                    let reply = 'Нет текста';
+                    if (jsonData.result?.content?.[0]?.text) {
+                        reply = jsonData.result.content[0].text;
+                    } else if (jsonData.result?.structuredContent?.result) {
+                        reply = jsonData.result.structuredContent.result;
+                    } else if (jsonData.result) {
+                        reply = JSON.stringify(jsonData.result);
+                    }
+                    log.textContent += `🤖 Ответ: ${reply}\n`;
+                } else {
+                    log.textContent += '⚠️ Не удалось извлечь data из ответа\n';
+                }
+
+                log.textContent += '\n✅ Тест завершён.';
+            } catch (err) {
+                log.textContent += `❌ Ошибка: ${err.message}\n`;
+                log.textContent += err.stack || '';
+            }
+        }
+    </script>
+</body>
+</html>
