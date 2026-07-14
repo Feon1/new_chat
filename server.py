@@ -101,11 +101,10 @@ async def send_to_xiaozhi(message: str) -> str:
                 await websocket.send(json.dumps(text_msg))
                 print("📤 Отправлен detect")
             else:
-                # Длинный запрос — ручной режим (без ограничения по длине)
-                await websocket.send(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
-                await websocket.send(json.dumps({"type": "stt", "text": message, "language": "ru"}))
-                await websocket.send(json.dumps({"type": "listen", "state": "stop"}))
-                print("📤 Отправлен ручной режим (start → stt → stop)")
+                # Длинный запрос — используем text с source
+                text_msg = {"type": "text", "text": message, "source": "text"}
+                await websocket.send(json.dumps(text_msg))
+                print("📤 Отправлен text (source=text)")
 
             full_reply = ""
             while True:
@@ -136,6 +135,12 @@ async def send_to_xiaozhi(message: str) -> str:
                         if "text" in data and data["text"].strip():
                             full_reply += data["text"]
                     elif data.get("state") in ("end", "stop"):
+                        break
+                elif msg_type == "text":
+                    # Возможный ответ в виде text
+                    if "text" in data and data["text"].strip():
+                        full_reply += data["text"]
+                    if data.get("state") in ("end", "stop"):
                         break
                 elif msg_type == "error":
                     return f"Ошибка от Xiaozhi: {data.get('message', 'неизвестная')}"
