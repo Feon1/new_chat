@@ -96,35 +96,74 @@ async def send_to_xiaozhi(message: str) -> str:
             except Exception as e:
                 return f"❌ Ошибка при получении hello: {e}"
 
-            # 3. Пробуем разные форматы
-            formats = [
-                {"type": "stt", "text": message, "language": "ru"},
-                {"type": "text", "text": message},
-                {"type": "llm", "text": message}
-            ]
-            for fmt in formats:
-                await websocket.send(json.dumps(fmt))
-                print(f"📤 Sent {fmt['type']}: {fmt.get('text')[:30]}...")
-                try:
-                    raw = await asyncio.wait_for(websocket.recv(), timeout=5.0)
-                    print(f"📩 Ответ на {fmt['type']}: {raw[:200]}")
-                    data = json.loads(raw)
-                    if data.get("type") == "llm":
-                        return data.get("text", "Пустой ответ")
-                    elif data.get("type") == "tts":
-                        return data.get("text", "Пустой ответ")
-                    elif data.get("type") == "error":
-                        return f"Ошибка: {data.get('message')}"
-                    elif data.get("type") == "alert":
-                        return f"Предупреждение: {data.get('message')}"
-                    else:
-                        return f"Неизвестный ответ: {data}"
-                except asyncio.TimeoutError:
-                    print(f"⏰ Таймаут на {fmt['type']}, пробуем следующий...")
-                    continue
+            # 3. Отправляем текстовый запрос через listen + stt + stop
+            # Активируем прослушивание
+            listen_msg = {
+                "type": "listen",
+                "state": "listen"
+            }
+            await websocket.send(json.dumps(listen_msg))
+            print("📤 Sent listen (state=listen)")
 
-            # Если ни один не сработал
-            return "⏰ Сервер Xiaozhi не отвечает на запросы (все форматы завершились таймаутом)"
+            # Отправляем распознанный текст
+            stt_msg = {
+                "type": "stt",
+                "text": message,
+                "language": "ru"
+            }
+            await websocket.send(json.dumps(stt_msg))
+            print("📤 Sent stt")
+
+            # Останавливаем прослушивание
+            stop_msg = {
+                "type": "listen",
+                "state": "stop"
+            }
+            await websocket.send(json.dumps(stop_msg))
+            print("📤 Sent listen (state=stop)")
+
+            # 4. Ждём ответ (llm или tts)
+            full_reply = ""
+            while True:
+                try:
+                    raw = await asyncio.wait_for(websocket.recv(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    if full_reply:
+                        print("⏰ Таймаут, но есть ответ, возвращаем накопленный текст")
+                        return full_reply
+                    else:
+                        return "⏰ Таймаут ожидания ответа от Xiaozhi"
+                if isinstance(raw, bytes):
+                    print("📩 Бинарные данные (аудио) пропущены")
+                    continue
+                try:
+                    data = json.loads(raw)
+                    print(f"📩 JSON: {data}")
+                except json.JSONDecodeError:
+                    continue
+                msg_type = data.get("type")
+                if msg_type == "stt":
+                    continue
+                elif msg_type == "llm":
+                    if "text" in data and data["text"].strip():
+                        full_reply += data["text"]
+                elif msg_type == "tts":
+                    if data.get("state") == "sentence_start":
+                        if "text" in data and data["text"].strip():
+                            full_reply += data["text"]
+                    elif data.get("state") in ("end", "stop"):
+                        break
+                elif msg_type == "error":
+                    return f"Ошибка от Xiaozhi: {data.get('message', 'неизвестная')}"
+                elif msg_type == "alert":
+                    return f"Ошибка Xiaozhi: {data.get('message', 'неизвестная')}"
+                else:
+                    print(f"⚠️ Неизвестный тип сообщения: {msg_type}")
+
+            print(f"✅ Full reply: {full_reply[:100]}...")
+            # 5. Штатное закрытие
+            await websocket.close()
+            return full_reply if full_reply else "Ответ не получен"
 
     except websockets.exceptions.ConnectionClosedError as e:
         print(f"❌ Соединение закрыто аварийно: {e}")
