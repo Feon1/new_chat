@@ -58,7 +58,6 @@ async def root():
 async def send_to_xiaozhi(message: str) -> str:
     print(f"📨 send_to_xiaozhi called with: {message} (len={len(message)})")
     
-    # Проверка длины
     if len(message) > MAX_LENGTH:
         return f"⚠️ Запрос слишком длинный ({len(message)} символов). Пожалуйста, сократите до {MAX_LENGTH} символов."
 
@@ -139,7 +138,7 @@ async def send_to_xiaozhi(message: str) -> str:
                 elif msg_type == "error":
                     return f"Ошибка от Xiaozhi: {data.get('message', 'неизвестная')}"
                 elif msg_type == "alert":
-                    return f"ALERT: {data.get('message', 'неизвестная')}"
+                    return f"Ошибка Xiaozhi: {data.get('message', 'неизвестная')}"
                 else:
                     print(f"⚠️ Неизвестный тип сообщения: {msg_type}")
 
@@ -181,7 +180,6 @@ async def mcp_handler(request: Request):
         if method == "notifications/initialized":
             return Response(status_code=200)
 
-        # Для методов tools/call сессия не требуется (для упрощения)
         if method == "tools/call":
             params = body.get("params", {})
             tool_name = params.get("name")
@@ -190,12 +188,12 @@ async def mcp_handler(request: Request):
             if tool_name == "send_message":
                 message = arguments.get("message", "")
                 result_text = await send_to_xiaozhi(message)
+                # Убираем structuredContent, оставляем только content
                 sse_data = {
                     "jsonrpc": "2.0",
                     "id": body.get("id"),
                     "result": {
-                        "content": [{"type": "text", "text": result_text}],
-                        "structuredContent": {"result": result_text}
+                        "content": [{"type": "text", "text": result_text}]
                     }
                 }
                 sse_body = f"event: message\ndata: {json.dumps(sse_data)}\n\n"
@@ -208,7 +206,6 @@ async def mcp_handler(request: Request):
                     "error": {"code": -32602, "message": f"Unknown tool: {tool_name}"}
                 }, status_code=400)
 
-        # Если метод не tools/call и не initialize — проверяем сессию
         if not session_id or session_id not in sessions:
             return JSONResponse({
                 "jsonrpc": "2.0",
@@ -216,7 +213,6 @@ async def mcp_handler(request: Request):
                 "error": {"code": -32000, "message": "Bad Request: No valid session ID provided"}
             }, status_code=400)
 
-        # Остальные методы
         return JSONResponse({
             "jsonrpc": "2.0",
             "id": body.get("id"),
