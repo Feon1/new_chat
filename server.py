@@ -65,6 +65,7 @@ async def send_to_xiaozhi(message: str) -> str:
     try:
         async with websockets.connect(ws_url, extra_headers=headers) as websocket:
             print("✅ WebSocket connected to Xiaozhi")
+            # 1. Отправляем hello
             hello = {
                 "type": "hello",
                 "version": 1,
@@ -79,6 +80,7 @@ async def send_to_xiaozhi(message: str) -> str:
             await websocket.send(json.dumps(hello))
             print("📤 Hello sent")
 
+            # 2. Ждём ответ на hello (session_id)
             try:
                 resp = await asyncio.wait_for(websocket.recv(), timeout=5.0)
                 print(f"📩 Received: {resp[:100]}...")
@@ -94,18 +96,23 @@ async def send_to_xiaozhi(message: str) -> str:
             except Exception as e:
                 return f"❌ Ошибка при получении hello: {e}"
 
+            # 3. Отправляем текстовый запрос через тип "stt" (вместо "listen/detect")
+            #    Это исправляет ошибку "Detect is only for wake words"
             text_msg = {
-                "type": "listen",
-                "state": "detect",
+                "type": "stt",
                 "text": message,
-                "source": "text"
+                "language": "ru"   # язык можно задать, если нужно
             }
             await websocket.send(json.dumps(text_msg))
-            print("📤 Text message sent")
+            print("📤 Text message sent (stt)")
 
+            # 4. Читаем ответы до получения tts state == "end" или "stop"
             full_reply = ""
             while True:
-                raw = await websocket.recv()
+                try:
+                    raw = await asyncio.wait_for(websocket.recv(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    return "⏰ Таймаут ожидания ответа от Xiaozhi"
                 if isinstance(raw, bytes):
                     print("📩 Бинарные данные (аудио) пропущены")
                     continue
@@ -128,9 +135,21 @@ async def send_to_xiaozhi(message: str) -> str:
                         break
                 elif msg_type == "error":
                     return f"Ошибка от Xiaozhi: {data.get('message', 'неизвестная')}"
+                elif msg_type == "alert":
+                    # Обработка предупреждений (например, слишком длинный текст)
+                    return f"Ошибка Xiaozhi: {data.get('message', 'неизвестная')}"
+                else:
+                    # Неизвестный тип – игнорируем или логируем
+                    print(f"⚠️ Неизвестный тип сообщения: {msg_type}")
+
             print(f"✅ Full reply: {full_reply[:100]}...")
+            # 5. Штатное закрытие соединения
+            await websocket.close()
             return full_reply if full_reply else "Ответ не получен"
 
+    except websockets.exceptions.ConnectionClosedError as e:
+        print(f"❌ Соединение закрыто аварийно: {e}")
+        return "❌ Ошибка соединения с Xiaozhi"
     except Exception as e:
         print(f"❌ Ошибка подключения к Xiaozhi: {e}")
         return f"❌ Ошибка подключения к Xiaozhi: {e}"
