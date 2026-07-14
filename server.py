@@ -101,18 +101,15 @@ async def send_to_xiaozhi(message: str) -> str:
                 await websocket.send(json.dumps(text_msg))
                 print("📤 Отправлен detect")
             else:
-                # Длинный запрос — вариант D: пробуждение + stt + stop
-                # 1. Отправляем короткое пробуждение
-                wake_msg = {"type": "listen", "state": "detect", "text": "внимание", "source": "text"}
-                await websocket.send(json.dumps(wake_msg))
-                print("📤 Отправлено пробуждение (detect) для длинного запроса")
-                # 2. Отправляем длинный текст через stt
-                stt_msg = {"type": "stt", "text": message, "language": "ru"}
-                await websocket.send(json.dumps(stt_msg))
-                print("📤 Отправлен stt с длинным текстом")
-                # 3. Останавливаем прослушивание (опционально)
-                await websocket.send(json.dumps({"type": "listen", "state": "stop"}))
-                print("📤 Отправлен listen stop")
+                # Длинный запрос — разбиваем на чанки по 50 символов и отправляем через detect
+                chunk_size = 50
+                chunks = [message[i:i+chunk_size] for i in range(0, len(message), chunk_size)]
+                print(f"📤 Разбито на {len(chunks)} частей")
+                for i, chunk in enumerate(chunks):
+                    print(f"📤 Отправка части {i+1}/{len(chunks)}: {chunk[:20]}...")
+                    await websocket.send(json.dumps({"type": "listen", "state": "detect", "text": chunk, "source": "text"}))
+                    # Небольшая задержка между частями, чтобы сервер успел обработать
+                    await asyncio.sleep(0.3)
 
             full_reply = ""
             while True:
