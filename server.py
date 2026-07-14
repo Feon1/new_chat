@@ -93,14 +93,15 @@ async def send_to_xiaozhi(message: str) -> str:
                 return "⏰ Таймаут: сервер не ответил на hello"
             except Exception as e:
                 return f"❌ Ошибка при получении hello: {e}"
-
-            text_msg = {
-                "type": "listen",
-                "state": "detect",
-                "text": message,
-                "source": "text"
-            }
-            await websocket.send(json.dumps(text_msg))
+            if len(message) <= 50:
+    # Короткий запрос — оставляем detect для скорости
+               text_msg = {"type": "listen", "state": "detect", "text": message, "source": "text"}
+               await websocket.send(json.dumps(text_msg))
+            else:
+    # Длинный запрос — ручной режим
+            await websocket.send(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
+            await websocket.send(json.dumps({"type": "stt", "text": message, "language": "ru"}))
+            await websocket.send(json.dumps({"type": "listen", "state": "stop"}))
             print("📤 Text message sent")
 
             full_reply = ""
