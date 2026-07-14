@@ -101,10 +101,18 @@ async def send_to_xiaozhi(message: str) -> str:
                 await websocket.send(json.dumps(text_msg))
                 print("📤 Отправлен detect")
             else:
-                # Длинный запрос — используем text с source
-                text_msg = {"type": "text", "text": message, "source": "text"}
-                await websocket.send(json.dumps(text_msg))
-                print("📤 Отправлен text (source=text)")
+                # Длинный запрос — вариант D: пробуждение + stt + stop
+                # 1. Отправляем короткое пробуждение
+                wake_msg = {"type": "listen", "state": "detect", "text": "внимание", "source": "text"}
+                await websocket.send(json.dumps(wake_msg))
+                print("📤 Отправлено пробуждение (detect) для длинного запроса")
+                # 2. Отправляем длинный текст через stt
+                stt_msg = {"type": "stt", "text": message, "language": "ru"}
+                await websocket.send(json.dumps(stt_msg))
+                print("📤 Отправлен stt с длинным текстом")
+                # 3. Останавливаем прослушивание (опционально)
+                await websocket.send(json.dumps({"type": "listen", "state": "stop"}))
+                print("📤 Отправлен listen stop")
 
             full_reply = ""
             while True:
