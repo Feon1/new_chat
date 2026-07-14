@@ -50,12 +50,10 @@ async def options_mcp():
 
 @app.get("/")
 async def root():
-    return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter (TEST MODE)"})
+    return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter (TEST MODE - NO SESSION CHECK)"})
 
 async def send_to_xiaozhi(message: str) -> str:
     print(f"📨 send_to_xiaozhi called with: {message} (len={len(message)})")
-    
-    # В ТЕСТОВОМ РЕЖИМЕ: отправляем ВСЁ через detect, без проверки длины
     headers = {
         "Device-Id": DEVICE_ID,
         "Client-Id": CLIENT_ID,
@@ -96,7 +94,6 @@ async def send_to_xiaozhi(message: str) -> str:
             except Exception as e:
                 return f"❌ Ошибка при получении hello: {e}"
 
-            # Отправляем через detect (без ограничений)
             text_msg = {"type": "listen", "state": "detect", "text": message, "source": "text"}
             await websocket.send(json.dumps(text_msg))
             print("📤 Отправлен detect")
@@ -176,13 +173,7 @@ async def mcp_handler(request: Request):
         if method == "notifications/initialized":
             return Response(status_code=200)
 
-        if not session_id or session_id not in sessions:
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": body.get("id"),
-                "error": {"code": -32000, "message": "Bad Request: No valid session ID provided"}
-            }, status_code=400)
-
+        # ВРЕМЕННО: пропускаем проверку session-id для tools/call
         if method == "tools/call":
             params = body.get("params", {})
             tool_name = params.get("name")
@@ -201,13 +192,20 @@ async def mcp_handler(request: Request):
                 }
                 sse_body = f"event: message\ndata: {json.dumps(sse_data)}\n\n"
                 return Response(content=sse_body, media_type="text/event-stream")
-
             else:
                 return JSONResponse({
                     "jsonrpc": "2.0",
                     "id": body.get("id"),
                     "error": {"code": -32602, "message": f"Unknown tool: {tool_name}"}
                 }, status_code=400)
+
+        # Для остальных методов — проверяем сессию
+        if not session_id or session_id not in sessions:
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": body.get("id"),
+                "error": {"code": -32000, "message": "Bad Request: No valid session ID provided"}
+            }, status_code=400)
 
         return JSONResponse({
             "jsonrpc": "2.0",
