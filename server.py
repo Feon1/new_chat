@@ -66,8 +66,10 @@ async def call_mcp_search_knowledge(query: str) -> str:
         print("⚠️ MCP_HUB_TOKEN отсутствует, пропускаем поиск")
         return ""
 
+    # Общие заголовки для всех запросов к MCP Hub
     headers = {
         "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",   # <-- исправление 406
         "Authorization": f"Bearer {MCP_HUB_TOKEN}"
     }
 
@@ -96,7 +98,6 @@ async def call_mcp_search_knowledge(query: str) -> str:
                     if not session_id:
                         print("⚠️ Не удалось получить session_id от MCP Hub")
                         return ""
-                    # Можно также отправить уведомление initialized, но это необязательно
                 else:
                     error_text = await resp.text()
                     print(f"⚠️ Ошибка инициализации MCP Hub: {resp.status} - {error_text}")
