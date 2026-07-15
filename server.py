@@ -3,6 +3,7 @@ import json
 import os
 import uuid
 import websockets
+import aiohttp
 from openai import AsyncOpenAI
 from fastapi import FastAPI, Request
 from starlette.middleware.cors import CORSMiddleware
@@ -38,15 +39,18 @@ CLIENT_ID = os.getenv("CLIENT_ID", "9cc3e5e4-adcf-4eff-8d23-95d4eaa21020")
 print(f"📱 Device ID: {DEVICE_ID}")
 print(f"📱 Client ID: {CLIENT_ID}")
 
+# --- Настройки MCP Hub ---
+MCP_HUB_URL = os.getenv("MCP_HUB_URL", "https://xiaozhi-mcphub-deploy-server.onrender.com/mcp")
+MCP_HUB_TOKEN = os.getenv("MCP_HUB_TOKEN", "")
+
 # --- Настройки Polza.ai ---
 POLZA_API_KEY = os.getenv("POLZA_API_KEY", "")
-POLZA_BASE_URL = "https://polza.ai/api/v1"          # OpenAI-совместимый эндпоинт Polza
-POLZA_MODEL = "deepseek/deepseek-r1-distill-llama-70b"  # Модель через Polza
+POLZA_BASE_URL = "https://polza.ai/api/v1"
+POLZA_MODEL = "deepseek/deepseek-r1-distill-llama-70b"
 
 if not POLZA_API_KEY:
     print("⚠️  POLZA_API_KEY не задан! Длинные запросы не будут обрабатываться.")
 
-# Инициализация клиента Polza.ai (совместим с OpenAI)
 polza_client = AsyncOpenAI(
     api_key=POLZA_API_KEY,
     base_url=POLZA_BASE_URL,
@@ -54,24 +58,68 @@ polza_client = AsyncOpenAI(
 
 # --- Вспомогательные функции ---
 
-async def call_polza(prompt: str) -> str:
-    """Вызов модели DeepSeek через Polza.ai с белым списком провайдера Chutes."""
-    if not POLZA_API_KEY:
-        return "⚠️ Polza.ai не настроен. Установите POLZA_API_KEY в переменных окружения."
-
+async def call_mcp_search_knowledge(query: str) -> str:
+    """Вызывает search_knowledge через MCP Hub и возвращает объединённый контекст."""
+    headers = {"Content-Type": "application/json"}
+    if MCP_HUB_TOKEN:
+        headers["Authorization"] = f"Bearer {MCP_HUB_TOKEN}"
+    
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": "search_knowledge",
+            "arguments": {"query": query}
+        },
+        "id": str(uuid.uuid4())
+    }
     try:
-        # Используем extra_body для передачи параметра provider с белым списком
+        async with aiohttp.ClientSession() as session:
+            async with session.post(MCP_HUB_URL, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    result = data.get("result", {})
+                    # Ожидаем, что search_knowledge возвращает content с текстом
+                    content = result.get("content", [])
+                    if content and isinstance(content, list):
+                        # Собираем все тексты фрагментов
+                        fragments = [item.get("text", "") for item in content if item.get("text")]
+                        if fragments:
+                            return "\n\n".join(fragments)
+                    # Если структура другая, пробуем structuredContent
+                    structured = result.get("structuredContent", {})
+                    if "result" in structured:
+                        return structured["result"]
+                    return ""
+                else:
+                    error_text = await resp.text()
+                    print(f"⚠️ MCP Hub error: {resp.status} - {error_text}")
+                    return ""
+    except Exception as e:
+        print(f"⚠️ Ошибка вызова search_knowledge через MCP Hub: {e}")
+        return ""
+
+async def call_polza_with_context(prompt: str, context: str) -> str:
+    """Вызов Polza.ai с системным промптом, контекстом и вопросом."""
+    if not POLZA_API_KEY:
+        return "⚠️ Polza.ai не настроен. Установите POLZA_API_KEY."
+    
+    system_prompt = "Ты — полезный ассистент. Отвечай на вопрос, используя предоставленный контекст."
+    if context:
+        system_prompt += f"\n\nКонтекст:\n{context}"
+    
+    try:
         response = await polza_client.chat.completions.create(
             model=POLZA_MODEL,
             messages=[
-                {"role": "system", "content": "Ты — полезный и дружелюбный ассистент."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.6,
             max_tokens=2000,
             extra_body={
                 "provider": {
-                    "only": ["Chutes"]  # Белый список — использовать только Chutes
+                    "only": ["Chutes"]
                 }
             }
         )
@@ -82,9 +130,15 @@ async def call_polza(prompt: str) -> str:
 async def send_to_xiaozhi(message: str) -> str:
     print(f"📨 send_to_xiaozhi called with: {message}")
 
-    # Если сообщение длиннее 50 символов — отправляем в Polza.ai (Chutes)
-    if len(message) > 1:
-        return await call_polza(message)
+    # --- Длинные запросы: RAG + Polza.ai ---
+    if len(message) > 50:
+        print("🔍 Выполняем поиск в базе знаний через MCP Hub...")
+        context = await call_mcp_search_knowledge(message)
+        if context:
+            print(f"📚 Найден контекст: {context[:200]}...")
+        else:
+            print("⚠️ Контекст не найден или поиск недоступен.")
+        return await call_polza_with_context(message, context)
 
     # --- Короткие запросы (≤50 символов) — через WebSocket Xiaozhi ---
     headers = {
@@ -195,7 +249,7 @@ async def options_mcp():
 
 @app.get("/")
 async def root():
-    return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter (Polza.ai + Chutes)"})
+    return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter (RAG + Chutes.ai)"})
 
 @app.post("/mcp")
 async def mcp_handler(request: Request):
@@ -214,7 +268,7 @@ async def mcp_handler(request: Request):
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "Xiaozhi Adapter (Polza.ai + Chutes)", "version": "1.0.0"}
+                    "serverInfo": {"name": "Xiaozhi Adapter (RAG + Chutes.ai)", "version": "1.0.0"}
                 }
             }
             response = JSONResponse(response_data)
