@@ -10,9 +10,9 @@ from starlette.responses import JSONResponse, Response
 import uvicorn
 from dotenv import load_dotenv
 
-# Импортируем MCP клиент для SSE
+# Используем MCP клиент для WebSocket
 from mcp import ClientSession
-from mcp.client.sse import sse_client
+from mcp.client.websocket import websocket_client
 
 load_dotenv()
 
@@ -42,16 +42,16 @@ CLIENT_ID = os.getenv("CLIENT_ID", "9cc3e5e4-adcf-4eff-8d23-95d4eaa21020")
 print(f"📱 Device ID: {DEVICE_ID}")
 print(f"📱 Client ID: {CLIENT_ID}")
 
-# --- Настройки MCP Hub (SSE) ---
-MCP_HUB_URL = os.getenv("MCP_HUB_URL", "https://xiaozhi-mcphub-deploy-server.onrender.com")
-MCP_HUB_TOKEN = os.getenv("MCP_HUB_TOKEN", "")
-if not MCP_HUB_TOKEN:
-    print("⚠️  MCP_HUB_TOKEN не задан! Поиск по базе знаний будет недоступен.")
+# --- Настройки MCP-эндпоинта Xiaozhi (для поиска знаний) ---
+XIAOZHI_MCP_URL = os.getenv("XIAOZHI_MCP_URL", "wss://api.xiaozhi.me/mcp/")
+XIAOZHI_MCP_TOKEN = os.getenv("XIAOZHI_MCP_TOKEN", "")
+if not XIAOZHI_MCP_TOKEN:
+    print("⚠️  XIAOZHI_MCP_TOKEN не задан! Поиск по базе знаний будет недоступен.")
 
-# --- Настройки Polza.ai (Chutes) ---
+# --- Настройки Polza.ai ---
 POLZA_API_KEY = os.getenv("POLZA_API_KEY", "")
 POLZA_BASE_URL = "https://polza.ai/api/v1"
-POLZA_MODEL = "deepseek/deepseek-v4-flash"
+POLZA_MODEL = "deepseek/deepseek-v4-flash"  # Используем новую модель
 
 if not POLZA_API_KEY:
     print("⚠️  POLZA_API_KEY не задан! Длинные запросы не будут обрабатываться.")
@@ -63,28 +63,24 @@ polza_client = AsyncOpenAI(
 
 # --- Вспомогательные функции ---
 
-async def call_mcp_search_knowledge(query: str) -> str:
+async def call_mcp_search_knowledge_direct(query: str) -> str:
     """
-    Вызывает search_knowledge через SSE-подключение к MCP Hub.
-    Возвращает объединённый контекст или пустую строку в случае ошибки.
+    Подключается напрямую к MCP-эндпоинту Xiaozhi через WebSocket,
+    вызывает search_knowledge и возвращает контекст.
     """
-    if not MCP_HUB_TOKEN:
-        print("⚠️ MCP_HUB_TOKEN отсутствует, пропускаем поиск")
+    if not XIAOZHI_MCP_TOKEN:
+        print("⚠️ XIAOZHI_MCP_TOKEN отсутствует, пропускаем поиск")
         return ""
 
-    sse_url = f"{MCP_HUB_URL}/sse"
-    headers = {
-        "Authorization": f"Bearer {MCP_HUB_TOKEN}",
-        "Accept": "application/json, text/event-stream"
-    }
-    print(f"🔗 Подключение к SSE: {sse_url} (с заголовками)")
+    ws_url = f"{XIAOZHI_MCP_URL}?token={XIAOZHI_MCP_TOKEN}"
+    print(f"🔗 Подключение к Xiaozhi MCP WebSocket: {ws_url[:80]}...")
 
     try:
-        async with sse_client(sse_url, headers=headers) as (read_stream, write_stream):
+        async with websocket_client(ws_url) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 # Инициализация MCP сессии
                 await session.initialize()
-                print("✅ MCP сессия инициализирована")
+                print("✅ MCP сессия с Xiaozhi инициализирована")
 
                 # Вызов инструмента search_knowledge
                 result = await session.call_tool("search_knowledge", arguments={"query": query})
@@ -104,14 +100,13 @@ async def call_mcp_search_knowledge(query: str) -> str:
                         return context
                 return ""
     except Exception as e:
-        print(f"⚠️ Ошибка вызова search_knowledge через SSE: {e}")
-        # Дополнительная диагностика
+        print(f"⚠️ Ошибка вызова search_knowledge напрямую: {e}")
         import traceback
         traceback.print_exc()
         return ""
 
 async def call_polza_with_context(prompt: str, context: str) -> str:
-    """Вызов Polza.ai с системным промптом, контекстом и вопросом, используя только Chutes."""
+    """Вызов Polza.ai с контекстом, без принудительного провайдера (автовыбор)."""
     if not POLZA_API_KEY:
         return "⚠️ Polza.ai не настроен. Установите POLZA_API_KEY."
 
@@ -130,29 +125,26 @@ async def call_polza_with_context(prompt: str, context: str) -> str:
             ],
             temperature=0.6,
             max_tokens=2000,
-            
+            # Без extra_body — Polza сама выберет провайдера
         )
         return response.choices[0].message.content or "Ответ не получен"
     except Exception as e:
-        error_msg = str(e)
-        if "No allowed providers" in error_msg:
-            return "❌ Провайдер Chutes временно недоступен для выбранной модели. Попробуйте позже."
         return f"⚠️ Ошибка при вызове Polza.ai: {e}"
 
 async def send_to_xiaozhi(message: str) -> str:
     print(f"📨 send_to_xiaozhi called with: {message}")
 
-    # Длинные запросы (>50 символов) – RAG + Polza.ai (только Chutes)
+    # Длинные запросы (>50 символов) – RAG + Polza.ai
     if len(message) > 50:
-        print("🔍 Выполняем поиск в базе знаний через MCP Hub (SSE)...")
-        context = await call_mcp_search_knowledge(message)
+        print("🔍 Выполняем поиск в базе знаний напрямую через Xiaozhi MCP...")
+        context = await call_mcp_search_knowledge_direct(message)
         if context:
             print(f"📚 Найден контекст: {context[:200]}...")
         else:
             print("⚠️ Контекст не найден.")
         return await call_polza_with_context(message, context)
 
-    # Короткие запросы (≤50 символов) – через WebSocket Xiaozhi
+    # Короткие запросы (≤50 символов) – через WebSocket Xiaozhi (голосовой режим)
     headers = {
         "Device-Id": DEVICE_ID,
         "Client-Id": CLIENT_ID,
@@ -261,7 +253,7 @@ async def options_mcp():
 
 @app.get("/")
 async def root():
-    return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter (RAG + Chutes.ai)"})
+    return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter (Direct RAG + Polza.ai)"})
 
 @app.post("/mcp")
 async def mcp_handler(request: Request):
@@ -280,7 +272,7 @@ async def mcp_handler(request: Request):
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "Xiaozhi Adapter (RAG + Chutes.ai)", "version": "1.0.0"}
+                    "serverInfo": {"name": "Xiaozhi Adapter (Direct RAG)", "version": "1.0.0"}
                 }
             }
             response = JSONResponse(response_data)
