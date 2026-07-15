@@ -131,7 +131,7 @@ async def send_to_xiaozhi(message: str) -> str:
     print(f"📨 send_to_xiaozhi called with: {message}")
 
     # --- Длинные запросы: RAG + Polza.ai ---
-    if len(message) > 50:
+    if len(message) > 1:
         print("🔍 Выполняем поиск в базе знаний через MCP Hub...")
         context = await call_mcp_search_knowledge(message)
         if context:
