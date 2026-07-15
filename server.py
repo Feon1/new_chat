@@ -80,15 +80,15 @@ async def call_mcp_search_knowledge(query: str) -> str:
                 "id": 1
             }
             await websocket.send(json.dumps(init_msg))
-            print("📤 Отправлен initialize")
+            print("📤 Отправлен initialize (id=1)")
 
-            # Ждём ответ на initialize
+            # Ждём ответ на initialize (любой, id может быть 0 или 1)
             try:
                 resp = await asyncio.wait_for(websocket.recv(), timeout=10.0)
                 data = json.loads(resp)
-                print(f"📩 Получен ответ на initialize: {data.get('id')}")
-                if data.get("id") != 1:
-                    print("⚠️ Неверный ID в ответе на initialize")
+                print(f"📩 Получен ответ на initialize: {data}")
+                if "error" in data:
+                    print(f"❌ Ошибка initialize: {data['error']}")
                     return ""
             except asyncio.TimeoutError:
                 print("⏰ Таймаут при initialize")
@@ -97,7 +97,7 @@ async def call_mcp_search_knowledge(query: str) -> str:
                 print(f"⚠️ Ошибка при initialize: {e}")
                 return ""
 
-            # Шаг 2: Отправить notifications/initialized
+            # Шаг 2: Отправить notifications/initialized (не обязательно, но отправим)
             notify_msg = {
                 "jsonrpc": "2.0",
                 "method": "notifications/initialized",
@@ -117,7 +117,7 @@ async def call_mcp_search_knowledge(query: str) -> str:
                 "id": 2
             }
             await websocket.send(json.dumps(call_msg))
-            print("📤 Вызов search_knowledge отправлен")
+            print("📤 Вызов search_knowledge отправлен (id=2)")
 
             # Шаг 4: Читаем ответы, собираем контекст
             while True:
@@ -128,7 +128,7 @@ async def call_mcp_search_knowledge(query: str) -> str:
                     break
                 try:
                     data = json.loads(resp)
-                    print(f"📩 Получено сообщение: {data.get('id')}")
+                    print(f"📩 Получено сообщение: {data}")
                 except json.JSONDecodeError:
                     continue
 
