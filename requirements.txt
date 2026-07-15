@@ -8,3 +8,6 @@ mcp>=1.0.0
 websockets>=14.0
 fastembed
 qdrant-client==1.9.1
+python-multipart
+pypdf
+python-docx
