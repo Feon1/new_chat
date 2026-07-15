@@ -5,4 +5,4 @@ python-dotenv
 starlette
 openai>=1.0.0
 aiohttp
-mcp
+mcp>=1.0.0
