@@ -8,6 +8,10 @@ import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import UploadFile, File
+import io
+from pypdf import PdfReader
+from docx import Document
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -52,6 +56,36 @@ async def startup_event():
 # ==========================================
 # ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: ПОЛУЧЕНИЕ ВЕКТОРА (JINA)
 # ==========================================
+def chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> list[str]:
+    """Разбивает длинный текст на перекрывающиеся фрагменты для лучшего поиска"""
+    chunks = []
+    # Сначала разбиваем на абзацы, чтобы не резать предложения посередине
+    paragraphs = text.split('\n\n')
+    current_chunk = ""
+    
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+            
+        if len(current_chunk) + len(para) <= chunk_size:
+            current_chunk += (("\n\n" if current_chunk else "") + para)
+        else:
+            if current_chunk:
+                chunks.append(current_chunk)
+            # Если один абзац сам по себе больше chunk_size, режем его жестко
+            if len(para) > chunk_size:
+                for i in range(0, len(para), chunk_size - overlap):
+                    chunks.append(para[i:i + chunk_size])
+                current_chunk = ""
+            else:
+                current_chunk = para
+                
+    if current_chunk:
+        chunks.append(current_chunk)
+        
+    # Фильтруем слишком короткие бессмысленные куски
+    return [c for c in chunks if len(c.strip()) > 30]
 async def get_embedding(text: str) -> list[float]:
     """Получает вектор текста через стабильный API Jina AI"""
     headers = {
@@ -114,7 +148,63 @@ async def add_knowledge(request: Request):
         print(f"❌ КРИТИЧЕСКАЯ ОШИБКА в /add_knowledge: {str(e)}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
-
+@app.post("/upload_document")
+async def upload_document(file: UploadFile = File(...)):
+    """Загружает PDF или DOCX, разбивает на чанки и добавляет в Qdrant"""
+    try:
+        filename = file.filename.lower()
+        content = await file.read()
+        text = ""
+        
+        print(f"📄 Обработка файла: {file.filename} ({len(content)} байт)")
+        
+        if filename.endswith('.pdf'):
+            reader = PdfReader(io.BytesIO(content))
+            text = "\n\n".join([page.extract_text() or "" for page in reader.pages])
+        elif filename.endswith('.docx'):
+            doc = Document(io.BytesIO(content))
+            text = "\n\n".join([para.text for para in doc.paragraphs])
+        else:
+            return JSONResponse({"error": "Поддерживаются только .pdf и .docx"}, status_code=400)
+            
+        if not text.strip():
+            return JSONResponse({"error": "Не удалось извлечь текст из документа"}, status_code=400)
+            
+        # Разбиваем на чанки
+        chunks = chunk_text(text)
+        print(f"✅ Документ разбит на {len(chunks)} фрагментов")
+        
+        success_count = 0
+        for i, chunk in enumerate(chunks):
+            try:
+                # Получаем вектор для каждого фрагмента
+                doc_vector = await get_embedding(chunk)
+                
+                # Сохраняем в Qdrant, добавляя имя файла в payload для справки
+                qdrant.upsert(
+                    collection_name=COLLECTION_NAME,
+                    points=[
+                        models.PointStruct(
+                            id=abs(hash(f"{file.filename}_{i}")) % 1000000000,
+                            vector=doc_vector,
+                            payload={"text": chunk, "source_file": file.filename}
+                        )
+                    ]
+                )
+                success_count += 1
+                if i % 5 == 0:
+                    print(f"  ⏳ Обработано {i}/{len(chunks)} фрагментов...")
+            except Exception as e:
+                print(f"  ⚠️ Пропуск фрагмента {i}: {e}")
+                
+        return JSONResponse({
+            "status": "success", 
+            "message": f"Успешно добавлено {success_count} из {len(chunks)} фрагментов из файла {file.filename}"
+        })
+        
+    except Exception as e:
+        print(f"❌ Ошибка загрузки документа: {str(e)}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 # ==========================================
 # ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: ПОИСК В БАЗЕ
 # ==========================================
@@ -157,7 +247,7 @@ async def handle_query(request: Request):
         if not text:
             return JSONResponse({"error": "Текст запроса пуст"}, status_code=400)
 
-        if len(text) > 40:
+        if len(text) > 1:
             print(f"🧠 Длинный запрос, используем RAG + LLM: '{text}'")
             
             context = await search_knowledge(text)
