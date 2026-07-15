@@ -41,7 +41,9 @@ print(f"📱 Client ID: {CLIENT_ID}")
 
 # --- Настройки MCP Hub ---
 MCP_HUB_URL = os.getenv("MCP_HUB_URL", "https://xiaozhi-mcphub-deploy-server.onrender.com/mcp")
-MCP_HUB_TOKEN = os.getenv("MCP_HUB_TOKEN", "")
+MCP_HUB_TOKEN = os.getenv("MCP_HUB_TOKEN", "h4tFxetThog2zILPVbBHiiaJ3ATIDCZeWQ")  # по умолчанию берём из скриншота
+if not MCP_HUB_TOKEN:
+    print("⚠️  MCP_HUB_TOKEN не задан! Поиск по базе знаний будет недоступен.")
 
 # --- Настройки Polza.ai ---
 POLZA_API_KEY = os.getenv("POLZA_API_KEY", "")
@@ -60,9 +62,14 @@ polza_client = AsyncOpenAI(
 
 async def call_mcp_search_knowledge(query: str) -> str:
     """Вызывает search_knowledge через MCP Hub и возвращает объединённый контекст."""
-    headers = {"Content-Type": "application/json"}
-    if MCP_HUB_TOKEN:
-        headers["Authorization"] = f"Bearer {MCP_HUB_TOKEN}"
+    if not MCP_HUB_TOKEN:
+        print("⚠️ MCP_HUB_TOKEN отсутствует, пропускаем поиск")
+        return ""
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {MCP_HUB_TOKEN}"
+    }
     
     payload = {
         "jsonrpc": "2.0",
@@ -73,20 +80,22 @@ async def call_mcp_search_knowledge(query: str) -> str:
         },
         "id": str(uuid.uuid4())
     }
+    print(f"📤 Отправка search_knowledge в MCP Hub: {MCP_HUB_URL}")
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(MCP_HUB_URL, headers=headers, json=payload) as resp:
+                print(f"📩 Ответ MCP Hub: статус {resp.status}")
                 if resp.status == 200:
                     data = await resp.json()
+                    print(f"📩 Данные: {json.dumps(data, indent=2)[:500]}...")
                     result = data.get("result", {})
-                    # Ожидаем, что search_knowledge возвращает content с текстом
+                    # Попробуем извлечь текст из content
                     content = result.get("content", [])
                     if content and isinstance(content, list):
-                        # Собираем все тексты фрагментов
                         fragments = [item.get("text", "") for item in content if item.get("text")]
                         if fragments:
                             return "\n\n".join(fragments)
-                    # Если структура другая, пробуем structuredContent
+                    # Попробуем structuredContent
                     structured = result.get("structuredContent", {})
                     if "result" in structured:
                         return structured["result"]
@@ -96,7 +105,7 @@ async def call_mcp_search_knowledge(query: str) -> str:
                     print(f"⚠️ MCP Hub error: {resp.status} - {error_text}")
                     return ""
     except Exception as e:
-        print(f"⚠️ Ошибка вызова search_knowledge через MCP Hub: {e}")
+        print(f"⚠️ Ошибка вызова search_knowledge: {e}")
         return ""
 
 async def call_polza_with_context(prompt: str, context: str) -> str:
@@ -117,11 +126,7 @@ async def call_polza_with_context(prompt: str, context: str) -> str:
             ],
             temperature=0.6,
             max_tokens=2000,
-            extra_body={
-                "provider": {
-                    "only": ["Chutes"]
-                }
-            }
+            # Не указываем провайдера принудительно — Polza сама выберет доступного
         )
         return response.choices[0].message.content or "Ответ не получен"
     except Exception as e:
@@ -131,7 +136,7 @@ async def send_to_xiaozhi(message: str) -> str:
     print(f"📨 send_to_xiaozhi called with: {message}")
 
     # --- Длинные запросы: RAG + Polza.ai ---
-    if len(message) > 1:
+    if len(message) > 50:
         print("🔍 Выполняем поиск в базе знаний через MCP Hub...")
         context = await call_mcp_search_knowledge(message)
         if context:
