@@ -41,14 +41,14 @@ print(f"📱 Client ID: {CLIENT_ID}")
 
 # --- Настройки MCP Hub ---
 MCP_HUB_URL = os.getenv("MCP_HUB_URL", "https://xiaozhi-mcphub-deploy-server.onrender.com/mcp")
-MCP_HUB_TOKEN = os.getenv("MCP_HUB_TOKEN", "h4tFxetThog2zILPVbBHiiaJ3ATIDCZeWQ")  # по умолчанию берём из скриншота
+MCP_HUB_TOKEN = os.getenv("MCP_HUB_TOKEN", "")
 if not MCP_HUB_TOKEN:
-    print("⚠️  MCP_HUB_TOKEN не задан! Поиск по базе знаний будет недоступен.")
+    print("⚠️  MCP_HUB_TOKEN не задан!")
 
-# --- Настройки Polza.ai ---
+# --- Настройки Polza.ai (Chutes) ---
 POLZA_API_KEY = os.getenv("POLZA_API_KEY", "")
 POLZA_BASE_URL = "https://polza.ai/api/v1"
-POLZA_MODEL = "deepseek/deepseek-r1-distill-llama-70b"
+POLZA_MODEL = "deepseek/deepseek-r1-distill-llama-70b"  # Модель через Polza
 
 if not POLZA_API_KEY:
     print("⚠️  POLZA_API_KEY не задан! Длинные запросы не будут обрабатываться.")
@@ -89,13 +89,13 @@ async def call_mcp_search_knowledge(query: str) -> str:
                     data = await resp.json()
                     print(f"📩 Данные: {json.dumps(data, indent=2)[:500]}...")
                     result = data.get("result", {})
-                    # Попробуем извлечь текст из content
+                    # Извлекаем текст из content
                     content = result.get("content", [])
                     if content and isinstance(content, list):
                         fragments = [item.get("text", "") for item in content if item.get("text")]
                         if fragments:
                             return "\n\n".join(fragments)
-                    # Попробуем structuredContent
+                    # Альтернативная структура
                     structured = result.get("structuredContent", {})
                     if "result" in structured:
                         return structured["result"]
@@ -109,15 +109,19 @@ async def call_mcp_search_knowledge(query: str) -> str:
         return ""
 
 async def call_polza_with_context(prompt: str, context: str) -> str:
-    """Вызов Polza.ai с системным промптом, контекстом и вопросом."""
+    """Вызов Polza.ai с системным промптом, контекстом и вопросом, используя только Chutes."""
     if not POLZA_API_KEY:
         return "⚠️ Polza.ai не настроен. Установите POLZA_API_KEY."
     
+    # Если контекст пустой, возвращаем ошибку
+    if not context or not context.strip():
+        return "❌ Не удалось найти информацию в базе знаний. Пожалуйста, переформулируйте запрос."
+
     system_prompt = "Ты — полезный ассистент. Отвечай на вопрос, используя предоставленный контекст."
-    if context:
-        system_prompt += f"\n\nКонтекст:\n{context}"
-    
+    system_prompt += f"\n\nКонтекст:\n{context}"
+
     try:
+        # Принудительно используем только Chutes
         response = await polza_client.chat.completions.create(
             model=POLZA_MODEL,
             messages=[
@@ -126,23 +130,31 @@ async def call_polza_with_context(prompt: str, context: str) -> str:
             ],
             temperature=0.6,
             max_tokens=2000,
-            # Не указываем провайдера принудительно — Polza сама выберет доступного
+            extra_body={
+                "provider": {
+                    "only": ["Chutes"]
+                }
+            }
         )
         return response.choices[0].message.content or "Ответ не получен"
     except Exception as e:
+        error_msg = str(e)
+        if "No allowed providers" in error_msg:
+            return "❌ Провайдер Chutes временно недоступен для выбранной модели. Попробуйте позже."
         return f"⚠️ Ошибка при вызове Polza.ai: {e}"
 
 async def send_to_xiaozhi(message: str) -> str:
     print(f"📨 send_to_xiaozhi called with: {message}")
 
-    # --- Длинные запросы: RAG + Polza.ai ---
-    if len(message) > 50:
+    # --- Длинные запросы: RAG + Polza.ai (только Chutes) ---
+    if len(message) > 1:
         print("🔍 Выполняем поиск в базе знаний через MCP Hub...")
         context = await call_mcp_search_knowledge(message)
         if context:
             print(f"📚 Найден контекст: {context[:200]}...")
         else:
-            print("⚠️ Контекст не найден или поиск недоступен.")
+            print("⚠️ Контекст не найден.")
+        # Передаём контекст (даже пустой) в функцию, которая сама обработает пустой контекст
         return await call_polza_with_context(message, context)
 
     # --- Короткие запросы (≤50 символов) — через WebSocket Xiaozhi ---
