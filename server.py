@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import uuid
-import websockets
+import aiohttp
 from openai import AsyncOpenAI
 from fastapi import FastAPI, Request
 from starlette.middleware.cors import CORSMiddleware
@@ -25,13 +25,15 @@ app.add_middleware(
 
 sessions = {}
 
-XIAOZHI_MCP_URL = os.getenv("XIAOZHI_MCP_URL", "wss://api.xiaozhi.me/mcp/")
-XIAOZHI_MCP_TOKEN = os.getenv("XIAOZHI_MCP_TOKEN", "")
-if not XIAOZHI_MCP_TOKEN:
-    print("⚠️ XIAOZHI_MCP_TOKEN не задан! Поиск в базе знаний недоступен.")
+# --- Настройки MCP Hub ---
+MCP_HUB_URL = os.getenv("MCP_HUB_URL", "https://xiaozhi-mcphub-deploy-server.onrender.com/mcp")
+MCP_HUB_TOKEN = os.getenv("MCP_HUB_TOKEN", "")
+if not MCP_HUB_TOKEN:
+    print("⚠️ MCP_HUB_TOKEN не задан! Поиск в базе знаний будет недоступен.")
 else:
-    print("✅ XIAOZHI_MCP_TOKEN загружен")
+    print("✅ MCP_HUB_TOKEN загружен")
 
+# --- Настройки Polza.ai ---
 POLZA_API_KEY = os.getenv("POLZA_API_KEY", "")
 POLZA_BASE_URL = "https://polza.ai/api/v1"
 POLZA_MODEL = "deepseek/deepseek-v4-flash"
@@ -49,89 +51,50 @@ if POLZA_API_KEY:
     except Exception as e:
         print(f"⚠️ Ошибка создания клиента Polza.ai: {e}")
 
+# --- Функция вызова search_knowledge через MCP Hub ---
 async def call_mcp_search_knowledge(query: str) -> str:
-    """Подключается к Xiaozhi MCP, инициализирует сессию и вызывает search_knowledge."""
-    if not XIAOZHI_MCP_TOKEN:
+    if not MCP_HUB_TOKEN:
         return ""
-    ws_url = f"{XIAOZHI_MCP_URL}?token={XIAOZHI_MCP_TOKEN}"
-    print(f"🔗 Подключение к Xiaozhi MCP: {ws_url[:80]}...")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {MCP_HUB_TOKEN}",
+        "Accept": "application/json, text/event-stream"
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": "search_knowledge",
+            "arguments": {"query": query}
+        },
+        "id": str(uuid.uuid4())
+    }
+    print(f"📤 Отправка search_knowledge в MCP Hub: {MCP_HUB_URL}")
     try:
-        async with websockets.connect(ws_url) as websocket:
-            print("✅ WebSocket подключен к Xiaozhi MCP")
-            # Шаг 1: Инициализация (JSON-RPC)
-            init_payload = {
-                "jsonrpc": "2.0",
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "Xiaozhi Adapter", "version": "1.0.0"}
-                },
-                "id": 1
-            }
-            await websocket.send(json.dumps(init_payload))
-            print("📤 Отправлен initialize (id=1)")
-            try:
-                resp = await asyncio.wait_for(websocket.recv(), timeout=10.0)
-                data = json.loads(resp)
-                print(f"📩 Ответ на initialize: {data}")
-                if "error" in data:
-                    print(f"⚠️ Ошибка initialize: {data['error']}")
-                    return ""
-            except Exception as e:
-                print(f"⚠️ Ошибка при initialize: {e}")
-                return ""
-
-            # Шаг 2: Уведомление о готовности
-            notify = {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
-            await websocket.send(json.dumps(notify))
-            print("📤 Отправлен notifications/initialized")
-
-            # Шаг 3: Вызов search_knowledge
-            call_payload = {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "search_knowledge",
-                    "arguments": {"query": query}
-                },
-                "id": 2
-            }
-            await websocket.send(json.dumps(call_payload))
-            print("📤 Вызов search_knowledge отправлен (id=2)")
-
-            # Шаг 4: Ожидание ответа
-            while True:
-                try:
-                    resp = await asyncio.wait_for(websocket.recv(), timeout=30.0)
-                    data = json.loads(resp)
-                    print(f"📩 Получено сообщение: {data}")
-                    if data.get("id") == 2:
-                        if "error" in data:
-                            print(f"❌ Ошибка search_knowledge: {data['error']}")
-                            return ""
-                        result = data.get("result", {})
-                        content = result.get("content", [])
-                        fragments = [item.get("text", "") for item in content if isinstance(item, dict) and item.get("text")]
+        async with aiohttp.ClientSession() as session:
+            async with session.post(MCP_HUB_URL, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    print(f"📩 Ответ от MCP Hub: {data}")
+                    result = data.get("result", {})
+                    content = result.get("content", [])
+                    if content and isinstance(content, list):
+                        fragments = [item.get("text", "") for item in content if item.get("text")]
                         if fragments:
-                            context = "\n\n".join(fragments)
-                            print(f"📚 Найден контекст: {context[:200]}...")
-                            return context
-                        else:
-                            print("⚠️ Пустой ответ от search_knowledge")
-                            return ""
-                except asyncio.TimeoutError:
-                    print("⏰ Таймаут ожидания ответа от search_knowledge")
-                    break
-            return ""
+                            return "\n\n".join(fragments)
+                    structured = result.get("structuredContent", {})
+                    if "result" in structured:
+                        return structured["result"]
+                    return ""
+                else:
+                    error_text = await resp.text()
+                    print(f"⚠️ Ошибка MCP Hub: {resp.status} - {error_text}")
+                    return ""
     except Exception as e:
-        print(f"⚠️ Ошибка вызова search_knowledge: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"⚠️ Ошибка вызова search_knowledge через MCP Hub: {e}")
         return ""
 
 async def call_polza_with_context(prompt: str, context: str) -> str:
-    """Отправляет запрос в Polza.ai с контекстом."""
     if not POLZA_API_KEY:
         return "⚠️ Polza.ai не настроен. Установите POLZA_API_KEY."
 
@@ -161,9 +124,8 @@ async def call_polza_with_context(prompt: str, context: str) -> str:
 async def send_to_xiaozhi(message: str) -> str:
     print(f"📨 send_to_xiaozhi called with: {message}")
 
-    # Если есть MCP-токен, сначала ищем контекст в базе знаний
-    if XIAOZHI_MCP_TOKEN:
-        print("🔍 Выполняем поиск в базе знаний через Xiaozhi MCP...")
+    if MCP_HUB_TOKEN:
+        print("🔍 Выполняем поиск в базе знаний через MCP Hub...")
         context = await call_mcp_search_knowledge(message)
         if context:
             print("✅ Контекст получен, отправляем в Polza.ai")
@@ -171,8 +133,9 @@ async def send_to_xiaozhi(message: str) -> str:
         else:
             return "❌ Не удалось найти информацию в базе знаний. Пожалуйста, переформулируйте запрос."
     else:
-        return "⚠️ XIAOZHI_MCP_TOKEN не задан! Поиск в базе знаний недоступен."
+        return "⚠️ MCP_HUB_TOKEN не задан! Поиск в базе знаний недоступен."
 
+# --- FastAPI handlers ---
 @app.options("/mcp")
 async def options_mcp():
     return Response(
@@ -187,7 +150,7 @@ async def options_mcp():
 
 @app.get("/")
 async def root():
-    return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter (RAG + Polza.ai)"})
+    return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter (MCP Hub + Polza.ai)"})
 
 @app.post("/mcp")
 async def mcp_handler(request: Request):
@@ -206,7 +169,7 @@ async def mcp_handler(request: Request):
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "Xiaozhi Adapter (RAG)", "version": "1.0.0"}
+                    "serverInfo": {"name": "Xiaozhi Adapter (MCP Hub)", "version": "1.0.0"}
                 }
             }
             response = JSONResponse(response_data)
