@@ -197,7 +197,7 @@ async def call_polza_with_context(prompt: str, context: str) -> str:
         return f"⚠️ Ошибка при вызове Polza.ai: {e}"
 
 # --- Основная функция отправки запроса ---
-
+print(f"DEBUG: XIAOZHI_MCP_TOKEN = {os.getenv('XIAOZHI_MCP_TOKEN', 'НЕ ЗАДАН')}")
 async def send_to_xiaozhi(message: str) -> str:
     print(f"📨 send_to_xiaozhi called with: {message}")
 
