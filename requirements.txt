@@ -1,8 +1,8 @@
 fastapi
 uvicorn
-websockets==12.0
 python-dotenv
 starlette
 openai>=1.0.0
 aiohttp
 mcp>=1.0.0
+websockets>=14.0
