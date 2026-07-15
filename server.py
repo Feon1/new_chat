@@ -25,21 +25,19 @@ app.add_middleware(
 
 sessions = {}
 
-# --- Настройки Xiaozhi MCP ---
 XIAOZHI_MCP_URL = os.getenv("XIAOZHI_MCP_URL", "wss://api.xiaozhi.me/mcp/")
 XIAOZHI_MCP_TOKEN = os.getenv("XIAOZHI_MCP_TOKEN", "")
 if not XIAOZHI_MCP_TOKEN:
-    print("⚠️  XIAOZHI_MCP_TOKEN не задан! Поиск в базе знаний будет недоступен.")
+    print("⚠️  XIAOZHI_MCP_TOKEN не задан!")
 else:
     print("✅ XIAOZHI_MCP_TOKEN загружен")
 
-# --- Настройки Polza.ai ---
 POLZA_API_KEY = os.getenv("POLZA_API_KEY", "")
 POLZA_BASE_URL = "https://polza.ai/api/v1"
 POLZA_MODEL = "deepseek/deepseek-v4-flash"
 
 if not POLZA_API_KEY:
-    print("⚠️  POLZA_API_KEY не задан! Длинные запросы не будут обрабатываться.")
+    print("⚠️  POLZA_API_KEY не задан!")
 else:
     print("✅ POLZA_API_KEY загружен")
 
@@ -50,15 +48,8 @@ if POLZA_API_KEY:
         base_url=POLZA_BASE_URL,
     )
 
-# --- Вспомогательные функции ---
-
 async def call_mcp_search_knowledge(query: str) -> str:
-    """
-    Подключается к MCP-эндпоинту Xiaozhi, выполняет инициализацию,
-    вызывает search_knowledge и возвращает контекст.
-    """
     if not XIAOZHI_MCP_TOKEN:
-        print("⚠️ XIAOZHI_MCP_TOKEN отсутствует")
         return ""
 
     ws_url = f"{XIAOZHI_MCP_URL}?token={XIAOZHI_MCP_TOKEN}"
@@ -68,7 +59,7 @@ async def call_mcp_search_knowledge(query: str) -> str:
         async with websockets.connect(ws_url) as websocket:
             print("✅ WebSocket подключен к Xiaozhi MCP")
 
-            # Шаг 1: Отправить initialize
+            # 1. Отправляем initialize (как раньше)
             init_msg = {
                 "jsonrpc": "2.0",
                 "method": "initialize",
@@ -81,89 +72,99 @@ async def call_mcp_search_knowledge(query: str) -> str:
             }
             await websocket.send(json.dumps(init_msg))
             print("📤 Отправлен initialize (id=1)")
-
-            # Ждём ответ на initialize (любой, id может быть 0 или 1)
             try:
                 resp = await asyncio.wait_for(websocket.recv(), timeout=10.0)
-                data = json.loads(resp)
-                print(f"📩 Получен ответ на initialize: {data}")
-                if "error" in data:
-                    print(f"❌ Ошибка initialize: {data['error']}")
-                    return ""
-            except asyncio.TimeoutError:
-                print("⏰ Таймаут при initialize")
-                return ""
-            except Exception as e:
-                print(f"⚠️ Ошибка при initialize: {e}")
-                return ""
+                print(f"📩 Ответ на initialize: {resp[:200]}")
+            except:
+                pass
 
-            # Шаг 2: Отправить notifications/initialized (не обязательно, но отправим)
-            notify_msg = {
-                "jsonrpc": "2.0",
-                "method": "notifications/initialized",
-                "params": {}
-            }
-            await websocket.send(json.dumps(notify_msg))
+            # 2. notifications/initialized
+            await websocket.send(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}))
             print("📤 Отправлен notifications/initialized")
 
-            # Шаг 3: Вызвать search_knowledge
-            call_msg = {
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": "search_knowledge",
-                    "arguments": {"query": query}
+            # 3. Пробуем разные варианты вызова search_knowledge
+            variants = [
+                # Вариант A: tools/call с search_knowledge
+                {
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "search_knowledge",
+                        "arguments": {"query": query}
+                    },
+                    "id": 2
                 },
-                "id": 2
-            }
-            await websocket.send(json.dumps(call_msg))
-            print("📤 Вызов search_knowledge отправлен (id=2)")
+                # Вариант B: tools/call с knowledge_search
+                {
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "knowledge_search",
+                        "arguments": {"query": query}
+                    },
+                    "id": 3
+                },
+                # Вариант C: проприетарный mcp
+                {
+                    "type": "mcp",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "search_knowledge",
+                        "arguments": {"query": query}
+                    },
+                    "id": 4
+                },
+                # Вариант D: обычный text
+                {
+                    "type": "text",
+                    "text": query,
+                    "source": "text"
+                }
+            ]
 
-            # Шаг 4: Читаем ответы, собираем контекст
-            while True:
+            for idx, variant in enumerate(variants):
+                print(f"📤 Пробуем вариант {idx+1}: {variant}")
+                await websocket.send(json.dumps(variant))
                 try:
-                    resp = await asyncio.wait_for(websocket.recv(), timeout=30.0)
-                except asyncio.TimeoutError:
-                    print("⏰ Таймаут ожидания ответа от search_knowledge")
-                    break
-                try:
+                    resp = await asyncio.wait_for(websocket.recv(), timeout=10.0)
                     data = json.loads(resp)
-                    print(f"📩 Получено сообщение: {data}")
-                except json.JSONDecodeError:
+                    print(f"📩 Получен ответ на вариант {idx+1}: {data}")
+                    # Анализируем ответ, ищем контент
+                    if "result" in data:
+                        result = data["result"]
+                        content = result.get("content", [])
+                        fragments = []
+                        for item in content:
+                            if isinstance(item, dict) and "text" in item:
+                                fragments.append(item["text"])
+                        if fragments:
+                            return "\n\n".join(fragments)
+                    if data.get("type") == "mcp_result":
+                        result = data.get("result", {})
+                        content = result.get("content", [])
+                        fragments = []
+                        for item in content:
+                            if isinstance(item, dict) and "text" in item:
+                                fragments.append(item["text"])
+                        if fragments:
+                            return "\n\n".join(fragments)
+                    if data.get("type") == "llm":
+                        if "text" in data and data["text"].strip():
+                            return data["text"]
+                except asyncio.TimeoutError:
+                    print(f"⏰ Таймаут варианта {idx+1}")
                     continue
 
-                # Проверяем, что это ответ на tools/call
-                if data.get("id") == 2:
-                    if "error" in data:
-                        error_msg = data["error"].get("message", "Неизвестная ошибка")
-                        print(f"❌ Ошибка от Xiaozhi: {error_msg}")
-                        return ""
-                    result = data.get("result", {})
-                    content = result.get("content", [])
-                    fragments = []
-                    for item in content:
-                        if isinstance(item, dict) and "text" in item:
-                            fragments.append(item["text"])
-                    if fragments:
-                        context = "\n\n".join(fragments)
-                        print(f"📚 Найден контекст: {context[:200]}...")
-                        return context
-                    else:
-                        return ""
-                else:
-                    # Игнорируем другие сообщения (например, уведомления)
-                    continue
             return ""
     except Exception as e:
-        print(f"⚠️ Ошибка вызова search_knowledge: {e}")
+        print(f"⚠️ Ошибка: {e}")
         import traceback
         traceback.print_exc()
         return ""
 
 async def call_polza_with_context(prompt: str, context: str) -> str:
-    """Отправляет запрос в Polza.ai с контекстом."""
     if not POLZA_API_KEY:
-        return "⚠️ Polza.ai не настроен. Установите POLZA_API_KEY."
+        return "⚠️ Polza.ai не настроен."
 
     if not polza_client:
         return "⚠️ Клиент Polza.ai недоступен."
@@ -188,12 +189,9 @@ async def call_polza_with_context(prompt: str, context: str) -> str:
     except Exception as e:
         return f"⚠️ Ошибка при вызове Polza.ai: {e}"
 
-# --- Основная функция обработки запросов ---
-
 async def send_to_xiaozhi(message: str) -> str:
     print(f"📨 send_to_xiaozhi called with: {message}")
 
-    # Для любых запросов (любой длины) – сначала ищем контекст в базе знаний Xiaozhi
     if XIAOZHI_MCP_TOKEN:
         print("🔍 Выполняем поиск в базе знаний через Xiaozhi MCP...")
         context = await call_mcp_search_knowledge(message)
@@ -204,8 +202,6 @@ async def send_to_xiaozhi(message: str) -> str:
             return "❌ Не удалось найти информацию в базе знаний. Пожалуйста, переформулируйте запрос."
     else:
         return "⚠️ XIAOZHI_MCP_TOKEN не задан! Поиск в базе знаний недоступен."
-
-# --- MCP-обработчик ---
 
 @app.options("/mcp")
 async def options_mcp():
