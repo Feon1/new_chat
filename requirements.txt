@@ -6,3 +6,5 @@ openai>=1.0.0
 aiohttp
 mcp>=1.0.0
 websockets>=14.0
+qdrant-client
+fastembed
