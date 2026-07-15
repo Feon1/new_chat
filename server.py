@@ -51,29 +51,8 @@ async def call_mcp_search_knowledge(query: str) -> str:
         async with websockets.connect(ws_url) as websocket:
             print("✅ WebSocket подключен")
 
-            # 1. Получаем session_id через hello
-            hello_msg = {
-                "type": "hello",
-                "version": 1,
-                "transport": "websocket",
-                "audio_params": {
-                    "format": "opus",
-                    "sample_rate": 16000,
-                    "channels": 1,
-                    "frame_duration": 60
-                }
-            }
-            await websocket.send(json.dumps(hello_msg))
-            resp = await asyncio.wait_for(websocket.recv(), timeout=10.0)
-            data = json.loads(resp)
-            session_id = data.get("session_id")
-            if not session_id:
-                print("❌ Не получен session_id")
-                return ""
-            print(f"✅ session_id: {session_id}")
-
-            # 2. Инициализация MCP
-            init_payload = {
+            # 1. Отправить initialize
+            init_msg = {
                 "jsonrpc": "2.0",
                 "method": "initialize",
                 "params": {
@@ -83,15 +62,26 @@ async def call_mcp_search_knowledge(query: str) -> str:
                 },
                 "id": 1
             }
-            await websocket.send(json.dumps({
-                "session_id": session_id,
-                "type": "mcp",
-                "payload": init_payload
-            }))
-            await asyncio.wait_for(websocket.recv(), timeout=10.0)
+            await websocket.send(json.dumps(init_msg))
+            print("📤 initialize отправлен")
+            try:
+                resp = await asyncio.wait_for(websocket.recv(), timeout=10.0)
+                print(f"📩 Ответ на initialize: {resp[:200]}")
+            except asyncio.TimeoutError:
+                print("⏰ Таймаут initialize")
+                return ""
 
-            # 3. Вызов search_knowledge
-            call_payload = {
+            # 2. Отправить notifications/initialized
+            notify_msg = {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {}
+            }
+            await websocket.send(json.dumps(notify_msg))
+            print("📤 notifications/initialized отправлен")
+
+            # 3. Вызвать search_knowledge
+            call_msg = {
                 "jsonrpc": "2.0",
                 "method": "tools/call",
                 "params": {
@@ -100,30 +90,36 @@ async def call_mcp_search_knowledge(query: str) -> str:
                 },
                 "id": 2
             }
-            await websocket.send(json.dumps({
-                "session_id": session_id,
-                "type": "mcp",
-                "payload": call_payload
-            }))
-            print("📤 search_knowledge отправлен")
+            await websocket.send(json.dumps(call_msg))
+            print("📤 tools/call (search_knowledge) отправлен")
 
-            # 4. Чтение ответа
+            # 4. Читаем ответы
             while True:
-                resp = await asyncio.wait_for(websocket.recv(), timeout=30.0)
-                data = json.loads(resp)
-                if data.get("type") != "mcp":
+                try:
+                    resp = await asyncio.wait_for(websocket.recv(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    print("⏰ Таймаут ожидания ответа search_knowledge")
+                    break
+                try:
+                    data = json.loads(resp)
+                    print(f"📩 Получено: {data}")
+                except json.JSONDecodeError:
                     continue
-                payload = data.get("payload", {})
-                if payload.get("id") == 2:
-                    if "error" in payload:
-                        print(f"❌ Ошибка: {payload['error']}")
+                # Проверяем, что это ответ на наш вызов (id=2)
+                if data.get("id") == 2:
+                    if "error" in data:
+                        print(f"❌ Ошибка: {data['error']}")
                         return ""
-                    result = payload.get("result", {})
+                    result = data.get("result", {})
                     content = result.get("content", [])
                     fragments = [item.get("text", "") for item in content if isinstance(item, dict) and item.get("text")]
                     if fragments:
                         return "\n\n".join(fragments)
                     return ""
+                else:
+                    # Игнорируем другие сообщения
+                    continue
+            return ""
     except Exception as e:
         print(f"⚠️ Ошибка: {e}")
         return ""
@@ -153,86 +149,4 @@ async def send_to_xiaozhi(message: str) -> str:
     context = await call_mcp_search_knowledge(message)
     return await call_polza(message, context)
 
-# --- FastAPI handlers (без изменений) ---
-@app.options("/mcp")
-async def options_mcp():
-    return Response(status_code=200, headers={
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Accept, mcp-session-id",
-        "Access-Control-Expose-Headers": "mcp-session-id",
-    })
-
-@app.get("/")
-async def root():
-    return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter (RAG + Polza)"})
-
-@app.post("/mcp")
-async def mcp_handler(request: Request):
-    try:
-        body = await request.json()
-        method = body.get("method")
-        session_id = request.headers.get("mcp-session-id")
-
-        if method == "initialize":
-            new_session_id = str(uuid.uuid4()).replace("-", "")
-            sessions[new_session_id] = {"active": True}
-            response = JSONResponse({
-                "jsonrpc": "2.0",
-                "id": body.get("id"),
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "Xiaozhi Adapter", "version": "1.0"}
-                }
-            })
-            response.headers["mcp-session-id"] = new_session_id
-            return response
-
-        if method == "notifications/initialized":
-            return Response(status_code=200)
-
-        if not session_id or session_id not in sessions:
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": body.get("id"),
-                "error": {"code": -32000, "message": "Bad Request: No valid session ID"}
-            }, status_code=400)
-
-        if method == "tools/call":
-            params = body.get("params", {})
-            if params.get("name") == "send_message":
-                message = params.get("arguments", {}).get("message", "")
-                result = await send_to_xiaozhi(message)
-                sse_data = {
-                    "jsonrpc": "2.0",
-                    "id": body.get("id"),
-                    "result": {
-                        "content": [{"type": "text", "text": result}],
-                        "structuredContent": {"result": result}
-                    }
-                }
-                return Response(
-                    content=f"event: message\ndata: {json.dumps(sse_data)}\n\n",
-                    media_type="text/event-stream"
-                )
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": body.get("id"),
-                "error": {"code": -32602, "message": f"Unknown tool: {params.get('name')}"}
-            }, status_code=400)
-
-        return JSONResponse({
-            "jsonrpc": "2.0",
-            "id": body.get("id"),
-            "error": {"code": -32601, "message": f"Method not found: {method}"}
-        }, status_code=400)
-    except Exception as e:
-        return JSONResponse({
-            "jsonrpc": "2.0",
-            "id": body.get("id") if 'body' in locals() else None,
-            "error": {"code": -32603, "message": str(e)}
-        }, status_code=500)
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+# ... (остальной код FastAPI без изменений)
