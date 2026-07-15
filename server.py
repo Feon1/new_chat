@@ -28,7 +28,7 @@ sessions = {}
 XIAOZHI_MCP_URL = os.getenv("XIAOZHI_MCP_URL", "wss://api.xiaozhi.me/mcp/")
 XIAOZHI_MCP_TOKEN = os.getenv("XIAOZHI_MCP_TOKEN", "")
 if not XIAOZHI_MCP_TOKEN:
-    print("⚠️  XIAOZHI_MCP_TOKEN не задан!")
+    print("⚠️ XIAOZHI_MCP_TOKEN не задан!")
 else:
     print("✅ XIAOZHI_MCP_TOKEN загружен")
 
@@ -36,150 +36,107 @@ POLZA_API_KEY = os.getenv("POLZA_API_KEY", "")
 POLZA_BASE_URL = "https://polza.ai/api/v1"
 POLZA_MODEL = "deepseek/deepseek-v4-flash"
 
-if not POLZA_API_KEY:
-    print("⚠️  POLZA_API_KEY не задан!")
-else:
-    print("✅ POLZA_API_KEY загружен")
-
 polza_client = None
 if POLZA_API_KEY:
-    polza_client = AsyncOpenAI(
-        api_key=POLZA_API_KEY,
-        base_url=POLZA_BASE_URL,
-    )
+    polza_client = AsyncOpenAI(api_key=POLZA_API_KEY, base_url=POLZA_BASE_URL)
 
 async def call_mcp_search_knowledge(query: str) -> str:
     if not XIAOZHI_MCP_TOKEN:
         return ""
 
     ws_url = f"{XIAOZHI_MCP_URL}?token={XIAOZHI_MCP_TOKEN}"
-    print(f"🔗 Подключение к Xiaozhi MCP WebSocket: {ws_url[:80]}...")
+    print(f"🔗 Подключение: {ws_url[:80]}...")
 
     try:
         async with websockets.connect(ws_url) as websocket:
-            print("✅ WebSocket подключен к Xiaozhi MCP")
+            print("✅ WebSocket подключен")
 
-            # 1. Отправляем initialize (как раньше)
-            init_msg = {
+            # 1. Получаем session_id через hello
+            hello_msg = {
+                "type": "hello",
+                "version": 1,
+                "transport": "websocket",
+                "audio_params": {
+                    "format": "opus",
+                    "sample_rate": 16000,
+                    "channels": 1,
+                    "frame_duration": 60
+                }
+            }
+            await websocket.send(json.dumps(hello_msg))
+            resp = await asyncio.wait_for(websocket.recv(), timeout=10.0)
+            data = json.loads(resp)
+            session_id = data.get("session_id")
+            if not session_id:
+                print("❌ Не получен session_id")
+                return ""
+            print(f"✅ session_id: {session_id}")
+
+            # 2. Инициализация MCP
+            init_payload = {
                 "jsonrpc": "2.0",
                 "method": "initialize",
                 "params": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {},
-                    "clientInfo": {"name": "Xiaozhi Adapter", "version": "1.0.0"}
+                    "clientInfo": {"name": "Adapter", "version": "1.0"}
                 },
                 "id": 1
             }
-            await websocket.send(json.dumps(init_msg))
-            print("📤 Отправлен initialize (id=1)")
-            try:
-                resp = await asyncio.wait_for(websocket.recv(), timeout=10.0)
-                print(f"📩 Ответ на initialize: {resp[:200]}")
-            except:
-                pass
+            await websocket.send(json.dumps({
+                "session_id": session_id,
+                "type": "mcp",
+                "payload": init_payload
+            }))
+            await asyncio.wait_for(websocket.recv(), timeout=10.0)
 
-            # 2. notifications/initialized
-            await websocket.send(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}))
-            print("📤 Отправлен notifications/initialized")
+            # 3. Вызов search_knowledge
+            call_payload = {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "search_knowledge",
+                    "arguments": {"query": query}
+                },
+                "id": 2
+            }
+            await websocket.send(json.dumps({
+                "session_id": session_id,
+                "type": "mcp",
+                "payload": call_payload
+            }))
+            print("📤 search_knowledge отправлен")
 
-            # 3. Пробуем разные варианты вызова search_knowledge
-            variants = [
-                # Вариант A: tools/call с search_knowledge
-                {
-                    "jsonrpc": "2.0",
-                    "method": "tools/call",
-                    "params": {
-                        "name": "search_knowledge",
-                        "arguments": {"query": query}
-                    },
-                    "id": 2
-                },
-                # Вариант B: tools/call с knowledge_search
-                {
-                    "jsonrpc": "2.0",
-                    "method": "tools/call",
-                    "params": {
-                        "name": "knowledge_search",
-                        "arguments": {"query": query}
-                    },
-                    "id": 3
-                },
-                # Вариант C: проприетарный mcp
-                {
-                    "type": "mcp",
-                    "method": "tools/call",
-                    "params": {
-                        "name": "search_knowledge",
-                        "arguments": {"query": query}
-                    },
-                    "id": 4
-                },
-                # Вариант D: обычный text
-                {
-                    "type": "text",
-                    "text": query,
-                    "source": "text"
-                }
-            ]
-
-            for idx, variant in enumerate(variants):
-                print(f"📤 Пробуем вариант {idx+1}: {variant}")
-                await websocket.send(json.dumps(variant))
-                try:
-                    resp = await asyncio.wait_for(websocket.recv(), timeout=10.0)
-                    data = json.loads(resp)
-                    print(f"📩 Получен ответ на вариант {idx+1}: {data}")
-                    # Анализируем ответ, ищем контент
-                    if "result" in data:
-                        result = data["result"]
-                        content = result.get("content", [])
-                        fragments = []
-                        for item in content:
-                            if isinstance(item, dict) and "text" in item:
-                                fragments.append(item["text"])
-                        if fragments:
-                            return "\n\n".join(fragments)
-                    if data.get("type") == "mcp_result":
-                        result = data.get("result", {})
-                        content = result.get("content", [])
-                        fragments = []
-                        for item in content:
-                            if isinstance(item, dict) and "text" in item:
-                                fragments.append(item["text"])
-                        if fragments:
-                            return "\n\n".join(fragments)
-                    if data.get("type") == "llm":
-                        if "text" in data and data["text"].strip():
-                            return data["text"]
-                except asyncio.TimeoutError:
-                    print(f"⏰ Таймаут варианта {idx+1}")
+            # 4. Чтение ответа
+            while True:
+                resp = await asyncio.wait_for(websocket.recv(), timeout=30.0)
+                data = json.loads(resp)
+                if data.get("type") != "mcp":
                     continue
-
-            return ""
+                payload = data.get("payload", {})
+                if payload.get("id") == 2:
+                    if "error" in payload:
+                        print(f"❌ Ошибка: {payload['error']}")
+                        return ""
+                    result = payload.get("result", {})
+                    content = result.get("content", [])
+                    fragments = [item.get("text", "") for item in content if isinstance(item, dict) and item.get("text")]
+                    if fragments:
+                        return "\n\n".join(fragments)
+                    return ""
     except Exception as e:
         print(f"⚠️ Ошибка: {e}")
-        import traceback
-        traceback.print_exc()
         return ""
 
-async def call_polza_with_context(prompt: str, context: str) -> str:
-    if not POLZA_API_KEY:
-        return "⚠️ Polza.ai не настроен."
-
-    if not polza_client:
-        return "⚠️ Клиент Polza.ai недоступен."
-
+async def call_polza(prompt: str, context: str) -> str:
     if not context or not context.strip():
-        return "❌ Не удалось найти информацию в базе знаний. Пожалуйста, переформулируйте запрос."
-
-    system_prompt = "Ты — полезный ассистент. Отвечай на вопрос, используя предоставленный контекст."
-    system_prompt += f"\n\nКонтекст:\n{context}"
-
+        return "❌ Не удалось найти информацию в базе знаний."
+    system = "Ты — полезный ассистент. Отвечай, используя контекст.\n\nКонтекст:\n" + context
     try:
         response = await polza_client.chat.completions.create(
             model=POLZA_MODEL,
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": system},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.6,
@@ -187,59 +144,48 @@ async def call_polza_with_context(prompt: str, context: str) -> str:
         )
         return response.choices[0].message.content or "Ответ не получен"
     except Exception as e:
-        return f"⚠️ Ошибка при вызове Polza.ai: {e}"
+        return f"⚠️ Ошибка Polza: {e}"
 
 async def send_to_xiaozhi(message: str) -> str:
-    print(f"📨 send_to_xiaozhi called with: {message}")
+    print(f"📨 Запрос: {message[:100]}...")
+    if not XIAOZHI_MCP_TOKEN:
+        return "⚠️ XIAOZHI_MCP_TOKEN не задан!"
+    context = await call_mcp_search_knowledge(message)
+    return await call_polza(message, context)
 
-    if XIAOZHI_MCP_TOKEN:
-        print("🔍 Выполняем поиск в базе знаний через Xiaozhi MCP...")
-        context = await call_mcp_search_knowledge(message)
-        if context:
-            print("✅ Контекст получен, отправляем в Polza.ai")
-            return await call_polza_with_context(message, context)
-        else:
-            return "❌ Не удалось найти информацию в базе знаний. Пожалуйста, переформулируйте запрос."
-    else:
-        return "⚠️ XIAOZHI_MCP_TOKEN не задан! Поиск в базе знаний недоступен."
-
+# --- FastAPI handlers (без изменений) ---
 @app.options("/mcp")
 async def options_mcp():
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Accept, mcp-session-id",
-            "Access-Control-Expose-Headers": "mcp-session-id",
-        }
-    )
+    return Response(status_code=200, headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Accept, mcp-session-id",
+        "Access-Control-Expose-Headers": "mcp-session-id",
+    })
 
 @app.get("/")
 async def root():
-    return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter (RAG + Polza.ai)"})
+    return JSONResponse({"status": "ok", "service": "Xiaozhi Adapter (RAG + Polza)"})
 
 @app.post("/mcp")
 async def mcp_handler(request: Request):
     try:
         body = await request.json()
-        print(f"📩 POST /mcp body: {body}")
         method = body.get("method")
         session_id = request.headers.get("mcp-session-id")
 
         if method == "initialize":
             new_session_id = str(uuid.uuid4()).replace("-", "")
             sessions[new_session_id] = {"active": True}
-            response_data = {
+            response = JSONResponse({
                 "jsonrpc": "2.0",
                 "id": body.get("id"),
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "Xiaozhi Adapter (RAG)", "version": "1.0.0"}
+                    "serverInfo": {"name": "Xiaozhi Adapter", "version": "1.0"}
                 }
-            }
-            response = JSONResponse(response_data)
+            })
             response.headers["mcp-session-id"] = new_session_id
             return response
 
@@ -250,43 +196,38 @@ async def mcp_handler(request: Request):
             return JSONResponse({
                 "jsonrpc": "2.0",
                 "id": body.get("id"),
-                "error": {"code": -32000, "message": "Bad Request: No valid session ID provided"}
+                "error": {"code": -32000, "message": "Bad Request: No valid session ID"}
             }, status_code=400)
 
         if method == "tools/call":
             params = body.get("params", {})
-            tool_name = params.get("name")
-            arguments = params.get("arguments", {})
-
-            if tool_name == "send_message":
-                message = arguments.get("message", "")
-                result_text = await send_to_xiaozhi(message)
+            if params.get("name") == "send_message":
+                message = params.get("arguments", {}).get("message", "")
+                result = await send_to_xiaozhi(message)
                 sse_data = {
                     "jsonrpc": "2.0",
                     "id": body.get("id"),
                     "result": {
-                        "content": [{"type": "text", "text": result_text}],
-                        "structuredContent": {"result": result_text}
+                        "content": [{"type": "text", "text": result}],
+                        "structuredContent": {"result": result}
                     }
                 }
-                sse_body = f"event: message\ndata: {json.dumps(sse_data)}\n\n"
-                return Response(content=sse_body, media_type="text/event-stream")
-
-            else:
-                return JSONResponse({
-                    "jsonrpc": "2.0",
-                    "id": body.get("id"),
-                    "error": {"code": -32602, "message": f"Unknown tool: {tool_name}"}
-                }, status_code=400)
+                return Response(
+                    content=f"event: message\ndata: {json.dumps(sse_data)}\n\n",
+                    media_type="text/event-stream"
+                )
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": body.get("id"),
+                "error": {"code": -32602, "message": f"Unknown tool: {params.get('name')}"}
+            }, status_code=400)
 
         return JSONResponse({
             "jsonrpc": "2.0",
             "id": body.get("id"),
             "error": {"code": -32601, "message": f"Method not found: {method}"}
         }, status_code=400)
-
     except Exception as e:
-        print(f"❌ Ошибка в mcp_handler: {e}")
         return JSONResponse({
             "jsonrpc": "2.0",
             "id": body.get("id") if 'body' in locals() else None,
@@ -294,5 +235,4 @@ async def mcp_handler(request: Request):
         }, status_code=500)
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
