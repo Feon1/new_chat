@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ-панель | История чатов</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        .admin-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+        }
+
+        .stat-box {
+            background: rgba(255,255,255,0.1);
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-box .number {
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .stat-box .label {
+            font-size: 12px;
+            opacity: 0.8;
+        }
+
+        .main-layout {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 20px;
+            height: calc(100vh - 140px);
+        }
+
+        /* Панель пользователей */
+        .users-panel {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .users-panel h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 10px;
+            background: #0f3460;
+            border: 1px solid #667eea;
+            border-radius: 8px;
+            color: #eee;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .search-box::placeholder {
+            color: #888;
+        }
+
+        .user-item {
+            background: #0f3460;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+        }
+
+        .user-item:hover {
+            background: #1a4a7a;
+            border-left-color: #667eea;
+        }
+
+        .user-item.active {
+            background: #1a4a7a;
+            border-left-color: #667eea;
+        }
+
+        .user-id {
+            font-size: 13px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+            word-break: break-all;
+        }
+
+        .user-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #888;
+        }
+
+        /* Панель чата */
+        .chat-panel {
+            background: #16213e;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: #0f3460;
+            padding: 15px 20px;
+            border-bottom: 1px solid #1a4a7a;
+        }
+
+        .chat-header h3 {
+            font-size: 16px;
+            color: #667eea;
+        }
+
+        .chat-header .subtitle {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message.user {
+            align-items: flex-end;
+        }
+
+        .message.bot {
+            align-items: flex-start;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .message.user .message-content {
+            background: #667eea;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.bot .message-content {
+            background: #0f3460;
+            color: #eee;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message-time {
+            font-size: 11px;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #888;
+        }
+
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: #5568d3;
+        }
+
+        /* Скроллбар */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1a2e;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 4px;
+        }
+
+        @media (max-width: 768px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+                height: auto;
+            }
+
+            .users-panel {
+                max-height: 300px;
+            }
+
+            .chat-panel {
+                height: 500px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <div class="header">
+            <h1>🔐 Админ-панель | История чатов</h1>
+            <div class="stats">
+                <div class="stat-box">
+                    <div class="number" id="totalUsers">0</div>
+                    <div class="label">Пользователей</div>
+                </div>
+                <div class="stat-box">
+                    <div class="number" id="totalMessages">0</div>
+                    <div class="label">Сообщений</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-layout">
+            <!-- Панель пользователей -->
+            <div class="users-panel">
+                <h2>👥 Пользователи</h2>
+                <input type="text" class="search-box" id="searchBox" placeholder="Поиск по user_id...">
+                <div id="usersList">
+                    <div class="loading">Загрузка...</div>
+                </div>
+            </div>
+
+            <!-- Панель чата -->
+            <div class="chat-panel">
+                <div class="chat-header">
+                    <h3 id="chatTitle">Выберите пользователя</h3>
+                    <div class="subtitle" id="chatSubtitle">Нажмите на пользователя слева, чтобы увидеть историю</div>
+                </div>
+                <div class="messages-container" id="messagesContainer">
+                    <div class="empty-state">
+                        <div class="icon">💬</div>
+                        <p>История чатов пуста</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Простая защита паролем
+const ADMIN_PASSWORD = 'ваш_секретный_пароль';
+const input = prompt('Введите пароль администратора:');
+if (input !== ADMIN_PASSWORD) {
+    document.body.innerHTML = '<h1 style="text-align:center;margin-top:50px;">Доступ запрещен</h1>';
+    throw new Error('Unauthorized');
+}
+        const API_BASE = 'https://docker-new-chat.onrender.com';
+        let allUsers = [];
+        let currentUser = null;
+
+        // Загрузка списка пользователей
+        async function loadUsers() {
+            try {
+                const response = await fetch(`${API_BASE}/get_all_users`);
+                const data = await response.json();
+                
+                if (data.users) {
+                    allUsers = data.users;
+                    document.getElementById('totalUsers').textContent = data.total;
+                    
+                    // Подсчитываем общее количество сообщений
+                    const totalMsgs = data.users.reduce((sum, u) => sum + u.message_count, 0);
+                    document.getElementById('totalMessages').textContent = totalMsgs;
+                    
+                    renderUsers(allUsers);
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки пользователей:', error);
+                document.getElementById('usersList').innerHTML = '<div class="loading">Ошибка загрузки</div>';
+            }
+        }
+
+        // Отрисовка списка пользователей
+        function renderUsers(users) {
+            const container = document.getElementById('usersList');
+            
+            if (users.length === 0) {
+                container.innerHTML = '<div class="empty-state"><p>Пользователи не найдены</p></div>';
+                return;
+            }
+
+            container.innerHTML = users.map(user => `
+                <div class="user-item ${currentUser === user.user_id ? 'active' : ''}" 
+                     onclick="selectUser('${user.user_id}')">
+                    <div class="user-id">${user.user_id}</div>
+                    <div class="user-meta">
+                        <span>💬 ${user.message_count} сообщ.</span>
+                        <span>${formatDate(user.last_activity)}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Выбор пользователя
+        async function selectUser(userId) {
+            currentUser = userId;
+            document.getElementById('chatTitle').textContent = `Чат: ${userId}`;
+            document.getElementById('chatSubtitle').textContent = 'Загрузка истории...';
+            
+            // Обновляем активный элемент
+            document.querySelectorAll('.user-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.currentTarget.classList.add('active');
+
+            try {
+                const response = await fetch(`${API_BASE}/get_history?user_id=${userId}`);
+                const data = await response.json();
+                
+                if (data.messages) {
+                    renderMessages(data.messages);
+                    document.getElementById('chatSubtitle').textContent = 
+                        `${data.messages.length} сообщений в истории`;
+                } else {
+                    document.getElementById('messagesContainer').innerHTML = 
+                        '<div class="empty-state"><div class="icon">📭</div><p>История пуста</p></div>';
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки истории:', error);
+                document.getElementById('messagesContainer').innerHTML = 
+                    '<div class="empty-state"><div class="icon">❌</div><p>Ошибка загрузки</p></div>';
+            }
+        }
+
+        // Отрисовка сообщений
+        function renderMessages(messages) {
+            const container = document.getElementById('messagesContainer');
+            
+            if (messages.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>Нет сообщений</p></div>';
+                return;
+            }
+
+            container.innerHTML = messages.map(msg => {
+                const time = new Date(msg.timestamp).toLocaleString('ru-RU', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                
+                const role = msg.role === 'user' ? 'user' : 'bot';
+                const icon = msg.role === 'user' ? '👤' : '🤖';
+                
+                return `
+                    <div class="message ${role}">
+                        <div class="message-content">${msg.content.replace(/\n/g, '<br>')}</div>
+                        <div class="message-time">${icon} ${time}</div>
+                    </div>
+                `;
+            }).join('');
+
+            // Прокрутка вниз
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // Форматирование даты
+        function formatDate(dateString) {
+            if (!dateString) return 'Неизвестно';
+            const date = new Date(dateString);
+            const now = new Date();
+            const diff = now - date;
+            
+            if (diff < 60000) return 'Только что';
+            if (diff < 3600000) return `${Math.floor(diff / 60000)} мин. назад`;
+            if (diff < 86400000) return `${Math.floor(diff / 3600000)} ч. назад`;
+            return date.toLocaleDateString('ru-RU');
+        }
+
+        // Поиск пользователей
+        document.getElementById('searchBox').addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filtered = allUsers.filter(u => 
+                u.user_id.toLowerCase().includes(query)
+            );
+            renderUsers(filtered);
+        });
+
+        // Автообновление каждые 30 секунд
+        setInterval(loadUsers, 30000);
+
+        // Загрузка при старте
+        loadUsers();
+    </script>
+</body>
+</html>
