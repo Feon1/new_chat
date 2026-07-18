@@ -51,8 +51,8 @@ qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
 @app.on_event("startup")
 async def startup_event():
-    """Создаем коллекции при запуске"""
-    # Коллекция для базы знаний
+    """Создаем коллекции и индексы при запуске"""
+    # 1. Коллекция для базы знаний
     try:
         qdrant.get_collection(COLLECTION_NAME)
         print(f"✅ Коллекция '{COLLECTION_NAME}' найдена")
@@ -63,7 +63,7 @@ async def startup_event():
         )
         print(f"✅ Коллекция '{COLLECTION_NAME}' создана")
     
-    # Коллекция для истории чатов (используем фиктивный вектор размера 1)
+    # 2. Коллекция для истории чатов
     try:
         qdrant.get_collection(HISTORY_COLLECTION)
         print(f"✅ Коллекция '{HISTORY_COLLECTION}' найдена")
@@ -73,6 +73,18 @@ async def startup_event():
             vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
         )
         print(f"✅ Коллекция '{HISTORY_COLLECTION}' создана")
+
+    # 3. 🚀 СОЗДАНИЕ ИНДЕКСА ДЛЯ user_id (КРИТИЧЕСКИ ВАЖНО!)
+    try:
+        qdrant.create_payload_index(
+            collection_name=HISTORY_COLLECTION,
+            field_name="user_id",
+            field_schema=models.PayloadSchemaType.KEYWORD
+        )
+        print("✅ Индекс для 'user_id' успешно создан")
+    except Exception:
+        # Если индекс уже существует, Qdrant выдаст ошибку, которую мы просто игнорируем
+        print("ℹ️ Индекс для 'user_id' уже существует, пропускаем")
 
 # ==========================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
