@@ -423,10 +423,8 @@
         </div>
     </div>
 
-    <script>
-        
+   <script>
 (function(){
-    // ---- Элементы ----
     const chatWidget = document.getElementById('chatWidget');
     const launcherBtn = document.getElementById('launcherBtn');
     const closeChatBtn = document.getElementById('closeChatBtn');
@@ -435,153 +433,74 @@
     const messageInput = document.getElementById('messageInput');
     const sendButton = document.getElementById('sendButton');
     const typingIndicator = document.getElementById('typingIndicator');
-    const indicator = document.getElementById('indicator');
-    const statusText = document.getElementById('statusText');
-    const hintText = document.getElementById('hintText');
-
-    // ---- Адрес нашего обновленного адаптера ----
     const API_URL = 'https://docker-new-chat.onrender.com/query';
+    const HISTORY_URL = 'https://docker-new-chat.onrender.com/get_history';
 
-    // ---- Проверка связи (простой GET запрос) ----
-    function pingAdapter(cb) {
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', 'https://docker-new-chat.onrender.com/', true);
-        xhr.timeout = 5000;
-        xhr.onload = function() {
-            // Даже если 404 (потому что нет GET /), сервер жив и отвечает
-            cb(this.status === 200 || this.status === 404); 
-        };
-        xhr.onerror = function() { cb(false); };
-        xhr.ontimeout = function() { cb(false); };
-        try { xhr.send(); } catch(e) { cb(false); }
+    // 1. Генерация и сохранение User ID
+    let userId = localStorage.getItem('xiaozhi_user_id');
+    if (!userId) {
+        userId = 'user_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('xiaozhi_user_id', userId);
     }
+    console.log("User ID:", userId);
 
-    function setOnline() {
-        indicator.classList.remove('loading', 'offline');
-        indicator.style.background = '#4CAF50';
-        indicator.style.boxShadow = '0 0 12px rgba(76,175,80,0.8)';
-        statusText.textContent = 'Соединение установлено';
-        statusText.classList.remove('offline-text', 'loading-text');
-        hintText.textContent = 'Нажмите на значок чата';
-    }
-
-    function setOffline() {
-        indicator.classList.add('offline');
-        indicator.classList.remove('loading');
-        indicator.style.background = '#f44336';
-        indicator.style.boxShadow = '0 0 12px rgba(244,67,54,0.8)';
-        statusText.textContent = 'Отсутствует соединение';
-        statusText.classList.add('offline-text');
-        statusText.classList.remove('loading-text');
-        hintText.textContent = 'Проверьте интернет';
-    }
-
-    function setLoading() {
-        indicator.classList.add('loading');
-        indicator.classList.remove('offline');
-        indicator.style.background = '#ff9800';
-        indicator.style.boxShadow = '0 0 12px rgba(255,152,0,0.8)';
-        statusText.textContent = 'Проверка соединения...';
-        statusText.classList.add('loading-text');
-        statusText.classList.remove('offline-text');
-    }
-
-    setLoading();
-    pingAdapter((ok) => { ok ? setOnline() : setOffline(); });
-    
-    // Пинг каждые 30 секунд
-    setInterval(() => {
-        pingAdapter((ok) => { ok ? setOnline() : setOffline(); });
-    }, 30000);
-
-    window.addEventListener('offline', setOffline);
-    window.addEventListener('online', () => {
-        setLoading();
-        pingAdapter((ok) => { ok ? setOnline() : setOffline(); });
-    });
-
-    // ---- Открытие/закрытие чата ----
-    function openChat() {
-        chatWidget.classList.add('open');
-        launcherBtn.classList.add('hidden');
-        hintText.textContent = 'Чат открыт';
-        messageInput.focus();
-    }
-
-    function closeChat() {
-        chatWidget.classList.remove('open');
-        launcherBtn.classList.remove('hidden');
-        hintText.textContent = 'Нажмите на значок чата';
-    }
-
+    // Функция открытия/закрытия (без изменений)
+    function openChat() { chatWidget.classList.add('open'); launcherBtn.classList.add('hidden'); messageInput.focus(); loadHistory(); }
+    function closeChat() { chatWidget.classList.remove('open'); launcherBtn.classList.remove('hidden'); }
     launcherBtn.addEventListener('click', openChat);
     openChatBtn.addEventListener('click', openChat);
     closeChatBtn.addEventListener('click', closeChat);
 
-    // ---- Работа с сообщениями ----
+    // 2. Загрузка истории при открытии чата
+    async function loadHistory() {
+        messages.innerHTML = ''; // Очищаем чат
+        try {
+            const res = await fetch(`${HISTORY_URL}?user_id=${userId}`);
+            const data = await res.json();
+            if (data.messages) {
+                data.messages.forEach(msg => {
+                    addMessage(msg.content, msg.role === 'user' ? 'user' : 'bot', new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}));
+                });
+            }
+        } catch (e) { console.error("Ошибка загрузки истории", e); }
+    }
+
+    // Добавление сообщения в DOM
     function addMessage(text, sender, time) {
         const div = document.createElement('div');
         div.className = 'message ' + sender;
-        
         const content = document.createElement('div');
-        // Используем innerHTML для поддержки переносов строк (\n) из ответов ИИ
         content.innerHTML = text.replace(/\n/g, '<br>'); 
-        
         const timeSpan = document.createElement('div');
         timeSpan.className = 'time';
-        timeSpan.textContent = time || new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-        
+        timeSpan.textContent = time;
         div.appendChild(content);
         div.appendChild(timeSpan);
         messages.appendChild(div);
         messages.scrollTop = messages.scrollHeight;
     }
 
-    function showTyping(show) {
-        typingIndicator.classList.toggle('active', show);
-        messages.scrollTop = messages.scrollHeight;
-    }
-
-    // ---- Отправка сообщения на наш RAG-сервер ----
+    // Отправка сообщения
     async function sendMessage() {
         const text = messageInput.value.trim();
         if (!text) return;
-        
-        if (indicator.classList.contains('offline')) {
-            addMessage('Нет соединения с сервером. Проверьте интернет.', 'bot');
-            return;
-        }
-
-        addMessage(text, 'user');
+        addMessage(text, 'user', new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}));
         messageInput.value = '';
         sendButton.disabled = true;
-        showTyping(true);
+        typingIndicator.classList.add('active');
 
         try {
-            // Простой и надежный POST запрос на наш эндпоинт /query
             const response = await fetch(API_URL, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ text: text })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text, user_id: userId }) // Отправляем user_id!
             });
-
-            if (!response.ok) {
-                throw new Error(`Ошибка сервера: ${response.status}`);
-            }
-
             const data = await response.json();
-            
-            showTyping(false);
-            
-            // Выводим ответ от ИИ (он лежит в поле data.answer)
-            addMessage(data.answer, 'bot');
-            
+            typingIndicator.classList.remove('active');
+            addMessage(data.answer, 'bot', new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}));
         } catch (err) {
-            showTyping(false);
-            addMessage('Ошибка: ' + err.message + '. Попробуйте еще раз.', 'bot');
-            console.error(err);
+            typingIndicator.classList.remove('active');
+            addMessage('Ошибка соединения', 'bot');
         } finally {
             sendButton.disabled = false;
             messageInput.focus();
@@ -589,19 +508,7 @@
     }
 
     sendButton.addEventListener('click', sendMessage);
-    
-    messageInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
-    });
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && chatWidget.classList.contains('open')) {
-            closeChat();
-        }
-    });
+    messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
 })();
 </script>
 </body>
