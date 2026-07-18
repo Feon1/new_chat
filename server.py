@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
+from fastapi import HTTPException, Request
 
 load_dotenv()
 
@@ -23,6 +24,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Получаем токен из переменных окружения
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
+
+# Функция-зависимость для проверки админа
+def verify_admin(request: Request):
+    token = request.headers.get("x-admin-token")
+    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Неверный токен администратора")
 
 # ==========================================
 # НАСТРОЙКИ
@@ -153,17 +164,17 @@ def get_history(user_id: str, limit: int = 50) -> list[dict]:
         return []
 
 @app.get("/get_all_users")
-async def get_all_users():
-    """Возвращает список всех пользователей и количество их сообщений"""
+async def get_all_users(request: Request):
+    # ПРОВАЕРКА: если токен неверный, сервер вернет ошибку 401 и код ниже не выполнится
+    verify_admin(request)
+    
     try:
-        # Получаем все точки из коллекции истории
         records, next_page = qdrant.scroll(
             collection_name=HISTORY_COLLECTION,
-            limit=1000,  # Максимум за раз
+            limit=1000,
             with_payload=True
         )
         
-        # Группируем по user_id
         users = {}
         for r in records:
             if r.payload:
@@ -175,13 +186,10 @@ async def get_all_users():
                         "last_activity": r.payload.get("timestamp", "")
                     }
                 users[uid]["message_count"] += 1
-                # Обновляем последнее время активности
                 if r.payload.get("timestamp", "") > users[uid]["last_activity"]:
                     users[uid]["last_activity"] = r.payload.get("timestamp", "")
         
-        # Сортируем по последней активности
         sorted_users = sorted(users.values(), key=lambda x: x["last_activity"], reverse=True)
-        
         return JSONResponse({"users": sorted_users, "total": len(sorted_users)})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
