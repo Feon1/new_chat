@@ -12,6 +12,11 @@ from fastapi import UploadFile, File
 import io
 from pypdf import PdfReader
 from docx import Document
+from supabase import create_client, Client
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -35,6 +40,8 @@ POLZA_API_KEY = os.getenv("POLZA_API_KEY")
 JINA_API_KEY = os.getenv("JINA_API_KEY") # Новый ключ Jina
 
 COLLECTION_NAME = "xiaozhi_knowledge"
+
+
 
 # Инициализация клиента Qdrant
 qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
@@ -239,66 +246,83 @@ async def search_knowledge(query: str) -> str:
 # ==========================================
 @app.post("/query")
 async def handle_query(request: Request):
-    """Маршрутизатор: короткие запросы -> XiaoZhi, длинные -> RAG + LLM"""
     try:
         body = await request.json()
         text = body.get("text", "")
+        user_id = body.get("user_id", "anonymous") # Получаем ID пользователя
         
         if not text:
             return JSONResponse({"error": "Текст запроса пуст"}, status_code=400)
 
-        if len(text) > 1:
-            print(f"🧠 Длинный запрос, используем RAG + LLM: '{text}'")
+        # 1. Сохраняем сообщение пользователя в историю
+        supabase.table("chat_history").insert({"user_id": user_id, "role": "user", "content": text}).execute()
+
+        if len(text) > 40:
+            print(f"🧠 Длинный запрос от {user_id}, используем RAG + LLM")
             
+            # 2. Получаем последние 5 сообщений этого пользователя для контекста (память)
+            history_response = supabase.table("chat_history") \
+                .select("role, content") \
+                .eq("user_id", user_id) \
+                .order("created_at", desc=True) \
+                .limit(5) \
+                .execute()
+            
+            # Формируем историю для промпта
+            chat_history_str = ""
+            if history_response.data:
+                # Переворачиваем список, чтобы он шел от старого к новому
+                for msg in reversed(history_response.data):
+                    role = "Пользователь" if msg['role'] == 'user' else "Ассистент"
+                    chat_history_str += f"{role}: {msg['content']}\n"
+
             context = await search_knowledge(text)
             
+            prompt = ""
+            if chat_history_str:
+                prompt += f"История текущего диалога:\n{chat_history_str}\n\n"
             if context:
-                prompt = (
-                    "Ты умный помощник. Используй следующий КОНТЕКСТ для ответа на вопрос. "
-                    "Если в контексте нет точного ответа, используй свои общие знания, но отдавай приоритет контексту.\n\n"
-                    f"КОНТЕКСТ:\n{context}\n\n"
-                    f"ВОПРОС ПОЛЬЗОВАТЕЛЯ: {text}"
-                )
-            else:
-                prompt = f"ВОПРОС ПОЛЬЗОВАТЕЛЯ: {text}"
+                prompt += f"Дополнительный КОНТЕКСТ из базы знаний:\n{context}\n\n"
             
+            prompt += f"Ответь на вопрос пользователя: {text}"
+
+            # 3. Вызываем LLM
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    "https://api.polza.ai/v1/chat/completions", 
-                    headers={
-                        "Authorization": f"Bearer {POLZA_API_KEY}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "model": "deepseek/deepseek-v4-flash",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.3
-                    },
+                    "https://api.polza.ai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"},
+                    json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3},
                     timeout=30.0
                 )
-                response.raise_for_status()
-                result = response.json()
-                answer = result["choices"][0]["message"]["content"]
+                answer = response.json()["choices"][0]["message"]["content"]
                 
-            return JSONResponse({
-                "answer": answer, 
-                "source": "rag_llm",
-                "context_used": bool(context)
-            })
+            # 4. Сохраняем ответ бота в историю
+            supabase.table("chat_history").insert({"user_id": user_id, "role": "bot", "content": answer}).execute()
+            
+            return JSONResponse({"answer": answer, "source": "rag_llm"})
         
         else:
-            print(f"⚡ Короткий запрос, перенаправляем в XiaoZhi: '{text}'")
-            return JSONResponse({
-                "answer": "Обработка короткого запроса через WebSocket XiaoZhi (вставьте ваш код здесь)",
-                "source": "xiaozhi_short"
-            })
+            # Для коротких запросов (если вы подключите XiaoZhi) логика та же
+            return JSONResponse({"answer": "Короткий запрос (заглушка)", "source": "xiaozhi_short"})
 
     except Exception as e:
-        print(f"❌ КРИТИЧЕСКАЯ ОШИБКА в /query: {str(e)}")
+        print(f"❌ Ошибка в /query: {str(e)}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+# Эндпоинт для просмотра истории (для фронтенда)
+@app.get("/get_history")
+async def get_history(user_id: str):
+    """Возвращает последние 50 сообщений пользователя"""
+    try:
+        response = supabase.table("chat_history") \
+            .select("role, content, created_at") \
+            .eq("user_id", user_id) \
+            .order("created_at", desc=True) \
+            .limit(50) \
+            .execute()
+        
+        # Переворачиваем, чтобы старые были сверху
+        messages = list(reversed(response.data))
+        return JSONResponse({"messages": messages})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
