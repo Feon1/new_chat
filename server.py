@@ -351,7 +351,7 @@ async def handle_query(request: Request):
                 "https://api.polza.ai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"},
                 json={
-                    "model": "deepseek-chat", 
+                    "model": "deepseek/deepseek-v4-flash", 
                     "messages": [{"role": "user", "content": prompt}], 
                     "temperature": 0.3
                 },
