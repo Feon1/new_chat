@@ -3,20 +3,19 @@ import json
 import asyncio
 import uuid
 from datetime import datetime
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from fastapi import HTTPException, Request
 
 load_dotenv()
 
 app = FastAPI(title="XiaoZhi RAG Adapter")
 
-# Разрешаем CORS
+# Разрешаем CORS (важно для работы с GitHub Pages и другими фронтендами)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,11 +24,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Получаем токены из переменных окружения
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-
-# Получаем токен из переменных окружения
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 
 # Функция-зависимость для проверки админа
 def verify_admin(request: Request):
@@ -53,7 +51,7 @@ qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
 @app.on_event("startup")
 async def startup_event():
-    """Создаем коллекции и индексы при запуске"""
+    """Создаем коллекции, индексы и устанавливаем вебхук Telegram при запуске"""
     # 1. Коллекция для базы знаний
     try:
         qdrant.get_collection(COLLECTION_NAME)
@@ -64,7 +62,7 @@ async def startup_event():
             vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE),
         )
         print(f"✅ Коллекция '{COLLECTION_NAME}' создана")
-    
+
     # 2. Коллекция для истории чатов
     try:
         qdrant.get_collection(HISTORY_COLLECTION)
@@ -85,8 +83,20 @@ async def startup_event():
         )
         print("✅ Индекс для 'user_id' успешно создан")
     except Exception:
-        # Если индекс уже существует, Qdrant выдаст ошибку, которую мы просто игнорируем
         print("ℹ️ Индекс для 'user_id' уже существует, пропускаем")
+
+    # 4. 🤖 АВТОМАТИЧЕСКАЯ УСТАНОВКА TELEGRAM WEBHOOK
+    if TELEGRAM_BOT_TOKEN and WEBHOOK_URL:
+        set_webhook_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={WEBHOOK_URL}"
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(set_webhook_url)
+                print(f"✅ Telegram Webhook установлен: {response.json()}")
+            except Exception as e:
+                print(f"❌ Ошибка установки Telegram Webhook: {e}")
+    else:
+        print("⚠️ Переменные TELEGRAM_BOT_TOKEN или WEBHOOK_URL не найдены. Вебхук не установлен.")
+
 
 # ==========================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -126,8 +136,7 @@ def save_to_history(user_id: str, role: str, content: str):
     try:
         message_id = str(uuid.uuid4())
         timestamp = datetime.utcnow().isoformat()
-        
-        # Используем фиктивный вектор [1.0], так как поиск по истории не нужен
+
         qdrant.upsert(
             collection_name=HISTORY_COLLECTION,
             points=[
@@ -151,7 +160,6 @@ def save_to_history(user_id: str, role: str, content: str):
 def get_history(user_id: str, limit: int = 50) -> list[dict]:
     """Получает историю сообщений пользователя"""
     try:
-        # Используем scroll для получения всех сообщений пользователя
         records, next_page = qdrant.scroll(
             collection_name=HISTORY_COLLECTION,
             scroll_filter=models.Filter(
@@ -165,105 +173,138 @@ def get_history(user_id: str, limit: int = 50) -> list[dict]:
             limit=limit,
             with_payload=True
         )
-        
-        # Сортируем по времени (от старых к новым)
+
         messages = sorted(
             [r.payload for r in records if r.payload],
             key=lambda x: x.get("timestamp", "")
         )
-        
         return messages
     except Exception as e:
         print(f"⚠️ Ошибка получения истории: {e}")
         return []
 
-@app.get("/get_all_users")
-async def get_all_users(request: Request):
-    # ПРОВАЕРКА: если токен неверный, сервер вернет ошибку 401 и код ниже не выполнится
-    verify_admin(request)
-    
-    try:
-        records, next_page = qdrant.scroll(
-            collection_name=HISTORY_COLLECTION,
-            limit=1000,
-            with_payload=True
-        )
-        
-        users = {}
-        for r in records:
-            if r.payload:
-                uid = r.payload.get("user_id", "unknown")
-                if uid not in users:
-                    users[uid] = {
-                        "user_id": uid,
-                        "message_count": 0,
-                        "last_activity": r.payload.get("timestamp", "")
-                    }
-                users[uid]["message_count"] += 1
-                if r.payload.get("timestamp", "") > users[uid]["last_activity"]:
-                    users[uid]["last_activity"] = r.payload.get("timestamp", "")
-        
-        sorted_users = sorted(users.values(), key=lambda x: x["last_activity"], reverse=True)
-        return JSONResponse({"users": sorted_users, "total": len(sorted_users)})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-# ==========================================
-# ЭНДПОИНТЫ
-# ==========================================
-@app.get("/")
-def read_root():
-    """Проверка работоспособности"""
-    return {"status": "running", "message": "XiaoZhi RAG Adapter работает!"}
-async def process_message_core(user_id: str, user_text: str) -> str:
-    """
-    Универсальное ядро чата: сохраняет сообщение, берет историю, 
-    запрашивает ИИ и сохраняет ответ. Используется и веб-чатом, и Telegram.
-    """
-    try:
-        # 1. Сохраняем сообщение пользователя в Qdrant
-        save_message_to_qdrant(user_id, "user", user_text)
-        
-        # 2. Получаем историю (последние N сообщений)
-        history = get_history_from_qdrant(user_id, limit=10)
-        
-        # 3. Формируем промпт для ИИ (здесь адаптируйте под вашу текущую логику запроса к ИИ)
-        # Пример: объединяем историю и новый запрос
-        context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history])
-        prompt = f"История диалога:\n{context}\n\nПользователь: {user_text}\nАссистент:"
-        
-        # 4. Запрос к вашей ИИ модели (замените на ваш реальный вызов ИИ, например, openai или polza)
-        # ai_response = await call_your_ai_model(prompt) 
-        # Для примера оставим заглушку, замените на ваш реальный код получения ответа:
-        ai_response = "Это ответ от ИИ (здесь должен быть ваш реальный вызов модели)." 
-        
-        # 5. Сохраняем ответ ИИ в Qdrant
-        save_message_to_qdrant(user_id, "assistant", ai_response)
-        
-        return ai_response
-        
-    except Exception as e:
-        print(f"❌ Ошибка в process_message_core: {e}")
-        return "Извините, произошла ошибка при обработке вашего сообщения."
 
-# Вспомогательная функция для отправки сообщения в Telegram
+# ==========================================
+# 🧠 УНИВЕРСАЛЬНОЕ ЯДРО ЧАТА (Telegram + Web)
+# ==========================================
+async def process_message_core(user_id: str, text: str) -> str:
+    """
+    Универсальная функция: сохраняет сообщение, берет историю, 
+    запрашивает ИИ с RAG и сохраняет ответ. Используется везде.
+    """
+    if len(text) > 1000:
+        return "Сообщение слишком длинное. Максимум 1000 символов."
+
+    print(f"🧠 Запрос от {user_id}: '{text[:50]}...'")
+
+    # 1. Сохраняем сообщение пользователя в историю
+    save_to_history(user_id, "user", text)
+
+    # 2. Получаем последние 6 сообщений для контекста
+    history = get_history(user_id, limit=6)
+
+    chat_history_str = ""
+    for msg in history:
+        role = "Пользователь" if msg['role'] == 'user' else "Ассистент"
+        chat_history_str += f"{role}: {msg['content']}\n"
+
+    # 3. Ищем дополнительный контекст в базе знаний
+    context = await search_knowledge(text)
+
+    # 4. Формируем умный промпт
+    prompt = ""
+    if chat_history_str:
+        prompt += f"История текущего диалога:\n{chat_history_str}\n\n"
+    if context:
+        prompt += f"Дополнительный КОНТЕКСТ из базы знаний:\n{context}\n\n"
+
+    prompt += f"Вопрос пользователя: {text}\n\nДай полезный, точный и развернутый ответ."
+
+    # 5. Вызываем LLM (DeepSeek через Polza.ai)
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.polza.ai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": "deepseek/deepseek-v4-flash",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3
+            },
+            timeout=30.0
+        )
+        response.raise_for_status()
+        answer = response.json()["choices"][0]["message"]["content"]
+
+    # 6. Сохраняем ответ бота в историю
+    save_to_history(user_id, "bot", answer)
+
+    return answer
+
+
+# ==========================================
+# 📱 TELEGRAM ИНТЕГРАЦИЯ
+# ==========================================
 async def send_telegram_message(chat_id: int, text: str):
+    """Отправляет сообщение пользователю в Telegram"""
     if not TELEGRAM_BOT_TOKEN:
         print("❌ TELEGRAM_BOT_TOKEN не настроен!")
         return
     
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    # Экранируем символы для Markdown, если нужно, или отправляем как plain text
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown" # Или уберите, если ИИ выдает обычный текст
+        "parse_mode": "Markdown"
     }
     
-async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as client:
         try:
             await client.post(url, json=payload)
         except Exception as e:
-            print(f"❌ Ошибка отправки в Telegram: {e}")    
+            print(f"❌ Ошибка отправки в Telegram: {e}")
+
+@app.post("/webhook/telegram")
+async def telegram_webhook(update: dict):
+    """Принимает обновления от Telegram"""
+    if "message" in update:
+        message = update["message"]
+        chat_id = message["chat"]["id"]
+        user_id = f"tg_{chat_id}"  # Уникальный ID для Qdrant (например, tg_123456789)
+        
+        # Игнорируем не-текстовые сообщения (фото, стикеры)
+        if "text" not in message:
+            return {"ok": True}
+            
+        text = message["text"].strip()
+        
+        # Обработка команды /start
+        if text.lower() == "/start":
+            welcome_text = (
+                "👋 Привет! Я ИИ-ассистент **Феон**.\n\n"
+                "Я могу отвечать на вопросы, помогать с задачами и поддерживать диалог. "
+                "Просто напишите мне что-нибудь!"
+            )
+            await send_telegram_message(chat_id, welcome_text)
+            return {"ok": True}
+        
+        # Вызываем наше универсальное ядро чата
+        try:
+            response_text = await process_message_core(user_id, text)
+            await send_telegram_message(chat_id, response_text)
+        except Exception as e:
+            print(f"❌ Ошибка обработки сообщения Telegram: {e}")
+            await send_telegram_message(chat_id, "Извините, произошла ошибка при обработке вашего сообщения.")
+        
+    return {"ok": True}
+
+
+# ==========================================
+# 🌐 ЭНДПОИНТЫ
+# ==========================================
+@app.get("/")
+def read_root():
+    """Проверка работоспособности"""
+    return {"status": "running", "message": "XiaoZhi RAG Adapter работает!"}
 
 @app.post("/add_knowledge")
 async def add_knowledge(request: Request):
@@ -273,7 +314,7 @@ async def add_knowledge(request: Request):
         text = body.get("text", "")
         if not text or len(text.strip()) < 10:
             return JSONResponse({"error": "Текст слишком короткий"}, status_code=400)
-        
+
         doc_vector = await get_embedding(text)
         qdrant.upsert(
             collection_name=COLLECTION_NAME,
@@ -294,11 +335,11 @@ async def upload_document(file: UploadFile = File(...)):
         import io
         from pypdf import PdfReader
         from docx import Document
-        
+
         filename = file.filename.lower()
         content = await file.read()
         text = ""
-        
+
         if filename.endswith('.pdf'):
             reader = PdfReader(io.BytesIO(content))
             text = "\n\n".join([page.extract_text() or "" for page in reader.pages])
@@ -307,8 +348,7 @@ async def upload_document(file: UploadFile = File(...)):
             text = "\n\n".join([para.text for para in doc.paragraphs])
         else:
             return JSONResponse({"error": "Поддерживаются только .pdf и .docx"}, status_code=400)
-        
-        # Разбиваем на чанки
+
         chunks = []
         paragraphs = text.split('\n\n')
         current_chunk = ""
@@ -324,13 +364,11 @@ async def upload_document(file: UploadFile = File(...)):
                 if len(para) > 800:
                     for i in range(0, len(para), 700):
                         chunks.append(para[i:i + 800])
-                    current_chunk = ""
-                else:
-                    current_chunk = para
+                current_chunk = ""
         if current_chunk:
             chunks.append(current_chunk)
         chunks = [c for c in chunks if len(c.strip()) > 30]
-        
+
         success_count = 0
         for i, chunk in enumerate(chunks):
             try:
@@ -346,7 +384,7 @@ async def upload_document(file: UploadFile = File(...)):
                 success_count += 1
             except Exception as e:
                 print(f"⚠️ Пропуск фрагмента {i}: {e}")
-        
+
         return JSONResponse({
             "status": "success",
             "message": f"Добавлено {success_count} из {len(chunks)} фрагментов"
@@ -356,64 +394,16 @@ async def upload_document(file: UploadFile = File(...)):
 
 @app.post("/query")
 async def handle_query(request: Request):
-    """Обработка любого запроса через умный LLM с историей и RAG"""
+    """Обработка запроса от веб-чата через универсальное ядро"""
     try:
         body = await request.json()
         text = body.get("text", "")
         user_id = body.get("user_id", "anonymous")
-        
-        # 1. Проверка на пустоту
+
         if not text:
             return JSONResponse({"error": "Текст пуст"}, status_code=400)
 
-        # 2. Ограничение длины сообщения (максимум 1000 символов)
-        if len(text) > 1000:
-            return JSONResponse({
-                "error": "Сообщение слишком длинное. Максимум 1000 символов."
-            }, status_code=400)
-
-        print(f"🧠 Запрос от {user_id}: '{text[:50]}...'")
-
-        # 3. Сохраняем сообщение пользователя в историю
-        save_to_history(user_id, "user", text)
-
-        # 4. Получаем последние 6 сообщений для контекста (3 пары вопрос-ответ)
-        history = get_history(user_id, limit=6)
-        
-        chat_history_str = ""
-        for msg in history:
-            role = "Пользователь" if msg['role'] == 'user' else "Ассистент"
-            chat_history_str += f"{role}: {msg['content']}\n"
-
-        # 5. Ищем дополнительный контекст в базе знаний
-        context = await search_knowledge(text)
-        
-        # 6. Формируем умный промпт
-        prompt = ""
-        if chat_history_str:
-            prompt += f"История текущего диалога:\n{chat_history_str}\n\n"
-        if context:
-            prompt += f"Дополнительный КОНТЕКСТ из базы знаний:\n{context}\n\n"
-        
-        prompt += f"Вопрос пользователя: {text}\n\nДай полезный, точный и развернутый ответ."
-
-        # 7. Вызываем LLM (DeepSeek через Polza.ai)
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://api.polza.ai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": "deepseek/deepseek-v4-flash", 
-                    "messages": [{"role": "user", "content": prompt}], 
-                    "temperature": 0.3
-                },
-                timeout=30.0
-            )
-            answer = response.json()["choices"][0]["message"]["content"]
-        
-        # 8. Сохраняем ответ бота в историю
-        save_to_history(user_id, "bot", answer)
-        
+        answer = await process_message_core(user_id, text)
         return JSONResponse({"answer": answer, "source": "rag_llm"})
 
     except Exception as e:
@@ -426,6 +416,36 @@ async def get_history_endpoint(user_id: str):
     try:
         messages = get_history(user_id, limit=50)
         return JSONResponse({"messages": messages})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/get_all_users")
+async def get_all_users(request: Request):
+    """Возвращает список всех пользователей для админ-панели"""
+    verify_admin(request)
+    try:
+        records, next_page = qdrant.scroll(
+            collection_name=HISTORY_COLLECTION,
+            limit=1000,
+            with_payload=True
+        )
+
+        users = {}
+        for r in records:
+            if r.payload:
+                uid = r.payload.get("user_id", "unknown")
+                if uid not in users:
+                    users[uid] = {
+                        "user_id": uid,
+                        "message_count": 0,
+                        "last_activity": r.payload.get("timestamp", "")
+                    }
+                users[uid]["message_count"] += 1
+                if r.payload.get("timestamp", "") > users[uid]["last_activity"]:
+                    users[uid]["last_activity"] = r.payload.get("timestamp", "")
+
+        sorted_users = sorted(users.values(), key=lambda x: x["last_activity"], reverse=True)
+        return JSONResponse({"users": sorted_users, "total": len(sorted_users)})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
