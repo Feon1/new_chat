@@ -25,6 +25,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 # Получаем токен из переменных окружения
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
@@ -212,6 +214,56 @@ async def get_all_users(request: Request):
 def read_root():
     """Проверка работоспособности"""
     return {"status": "running", "message": "XiaoZhi RAG Adapter работает!"}
+async def process_message_core(user_id: str, user_text: str) -> str:
+    """
+    Универсальное ядро чата: сохраняет сообщение, берет историю, 
+    запрашивает ИИ и сохраняет ответ. Используется и веб-чатом, и Telegram.
+    """
+    try:
+        # 1. Сохраняем сообщение пользователя в Qdrant
+        save_message_to_qdrant(user_id, "user", user_text)
+        
+        # 2. Получаем историю (последние N сообщений)
+        history = get_history_from_qdrant(user_id, limit=10)
+        
+        # 3. Формируем промпт для ИИ (здесь адаптируйте под вашу текущую логику запроса к ИИ)
+        # Пример: объединяем историю и новый запрос
+        context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history])
+        prompt = f"История диалога:\n{context}\n\nПользователь: {user_text}\nАссистент:"
+        
+        # 4. Запрос к вашей ИИ модели (замените на ваш реальный вызов ИИ, например, openai или polza)
+        # ai_response = await call_your_ai_model(prompt) 
+        # Для примера оставим заглушку, замените на ваш реальный код получения ответа:
+        ai_response = "Это ответ от ИИ (здесь должен быть ваш реальный вызов модели)." 
+        
+        # 5. Сохраняем ответ ИИ в Qdrant
+        save_message_to_qdrant(user_id, "assistant", ai_response)
+        
+        return ai_response
+        
+    except Exception as e:
+        print(f"❌ Ошибка в process_message_core: {e}")
+        return "Извините, произошла ошибка при обработке вашего сообщения."
+
+# Вспомогательная функция для отправки сообщения в Telegram
+async def send_telegram_message(chat_id: int, text: str):
+    if not TELEGRAM_BOT_TOKEN:
+        print("❌ TELEGRAM_BOT_TOKEN не настроен!")
+        return
+    
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    # Экранируем символы для Markdown, если нужно, или отправляем как plain text
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown" # Или уберите, если ИИ выдает обычный текст
+    }
+    
+async with httpx.AsyncClient() as client:
+        try:
+            await client.post(url, json=payload)
+        except Exception as e:
+            print(f"❌ Ошибка отправки в Telegram: {e}")    
 
 @app.post("/add_knowledge")
 async def add_knowledge(request: Request):
