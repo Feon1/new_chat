@@ -377,6 +377,27 @@ async def get_history_endpoint(user_id: str):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.delete("/delete_user")
+async def delete_user(user_id: str, request: Request):
+    """Удаляет всю историю сообщений конкретного пользователя из Qdrant"""
+    verify_admin(request)
+    try:
+        qdrant.delete(
+            collection_name=HISTORY_COLLECTION,
+            points_selector=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=user_id)
+                    )
+                ]
+            )
+        )
+        return JSONResponse({"status": "success", "message": f"Пользователь {user_id} удален"})
+    except Exception as e:
+        print(f"❌ Ошибка удаления пользователя: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 10000))
