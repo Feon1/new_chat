@@ -211,14 +211,45 @@
         const HISTORY_URL = 'https://docker-new-chat.onrender.com/get_history';
         const PING_URL = 'https://docker-new-chat.onrender.com/';
 
-        // User ID
-        let userId = localStorage.getItem('xiaozhi_user_id');
-        if (!userId) {
-            userId = 'user_' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('xiaozhi_user_id', userId);
+        // ==========================================
+// СТАБИЛЬНАЯ ГЕНЕРАЦИЯ USER ID (LocalStorage + Cookie)
+// ==========================================
+function getStableUserId() {
+    // 1. Пробуем достать из localStorage
+    let userId = localStorage.getItem('feon_stable_user_id');
+    
+    // 2. Если нет, пробуем достать из Cookie (часто выживает там, где стирается localStorage)
+    if (!userId) {
+        const match = document.cookie.match(/(?:^|; )feon_user_id=([^;]*)/);
+        if (match) {
+            userId = decodeURIComponent(match[1]);
+            // Если нашли в cookie, восстанавливаем и в localStorage на будущее
+            localStorage.setItem('feon_stable_user_id', userId);
         }
+    }
 
-        let isConnected = false;
+    // 3. Если всё ещё нет, генерируем новый и сохраняем в ОБА места
+    if (!userId) {
+        userId = 'web_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+        
+        // Сохраняем в localStorage
+        localStorage.setItem('feon_stable_user_id', userId);
+        
+        // Сохраняем в Cookie на 10 лет (максимальная совместимость с веб-вью)
+        const expiryDate = new Date();
+        expiryDate.setFullYear(expiryDate.getFullYear() + 10);
+        document.cookie = `feon_user_id=${encodeURIComponent(userId)}; expires=${expiryDate.toUTCString()}; path=/; SameSite=Lax`;
+        
+        console.log('🆕 Сгенерирован новый стабильный ID:', userId);
+    } else {
+        console.log('✅ Найден сохраненный стабильный ID:', userId);
+    }
+    
+    return userId;
+}
+
+// Инициализируем ID один раз при загрузке
+const userId = getStableUserId();
 
         // Функция пинга
         function pingServer(callback) {
