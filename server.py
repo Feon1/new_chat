@@ -460,6 +460,107 @@ async def delete_user(user_id: str, request: Request):
         print(f"❌ Ошибка удаления пользователя: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.get("/get_all_knowledge")
+async def get_all_knowledge(request: Request):
+    """Возвращает список всех знаний из базы для админ-панели"""
+    verify_admin(request)
+    try:
+        records, next_page = qdrant.scroll(
+            collection_name=COLLECTION_NAME,
+            limit=1000,
+            with_payload=True
+        )
+
+        knowledge_list = []
+        for r in records:
+            if r.payload:
+                knowledge_list.append({
+                    "id": r.id,
+                    "text": r.payload.get("text", ""),
+                    "source_file": r.payload.get("source_file", "Ручной ввод"),
+                    "length": len(r.payload.get("text", ""))
+                })
+
+        # Группируем по файлам для статистики
+        files_stats = {}
+        for item in knowledge_list:
+            fname = item["source_file"]
+            if fname not in files_stats:
+                files_stats[fname] = {"name": fname, "chunks": 0, "total_length": 0}
+            files_stats[fname]["chunks"] += 1
+            files_stats[fname]["total_length"] += item["length"]
+
+        return JSONResponse({
+            "knowledge": knowledge_list,
+            "total": len(knowledge_list),
+            "files": list(files_stats.values())
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.delete("/delete_knowledge")
+async def delete_knowledge(request: Request):
+    """Удаляет конкретный фрагмент знания по его ID"""
+    verify_admin(request)
+    try:
+        body = await request.json()
+        knowledge_id = body.get("id")
+        
+        if not knowledge_id:
+            return JSONResponse({"error": "ID не указан"}, status_code=400)
+        
+        qdrant.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=models.PointIdsList(
+                points=[knowledge_id]
+            )
+        )
+        return JSONResponse({"status": "success", "message": f"Знание {knowledge_id} удалено"})
+    except Exception as e:
+        print(f"❌ Ошибка удаления знания: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.delete("/delete_file_knowledge")
+async def delete_file_knowledge(file_name: str, request: Request):
+    """Удаляет ВСЕ фрагменты, загруженные из конкретного файла"""
+    verify_admin(request)
+    try:
+        # Сначала находим все ID, связанные с этим файлом
+        records, _ = qdrant.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="source_file",
+                        match=models.MatchValue(value=file_name)
+                    )
+                ]
+            ),
+            limit=1000,
+            with_payload=False
+        )
+        
+        if not records:
+            return JSONResponse({"error": "Файл не найден"}, status_code=404)
+        
+        ids_to_delete = [r.id for r in records]
+        
+        qdrant.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=models.PointIdsList(
+                points=ids_to_delete
+            )
+        )
+        return JSONResponse({
+            "status": "success", 
+            "message": f"Удалено {len(ids_to_delete)} фрагментов из файла {file_name}"
+        })
+    except Exception as e:
+        print(f"❌ Ошибка удаления файла: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 10000))
