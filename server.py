@@ -122,6 +122,8 @@ async def get_embedding(text: str) -> list[float]:
             headers=headers,
             timeout=30.0
         )
+        print(f"📤 Статус ответа Polza: {response.status_code}")
+        print(f"📤 Текст ответа Polza: {response.text}")
         response.raise_for_status()
         return response.json()["data"][0]["embedding"]
 
@@ -192,51 +194,23 @@ async def process_message_core(user_id: str, text: str) -> str:
     print(f"🧠 Запрос от {user_id}: '{text[:50]}...'")
     save_to_history(user_id, "user", text)
 
-    # 1. Загружаем историю (последние 4 сообщения)
-    history = get_history(user_id, limit=4)
-    chat_history_str = ""
-    for msg in history:
-        role = "Пользователь" if msg['role'] == 'user' else "Ассистент"
-        chat_history_str += f"{role}: {msg['content']}\n"
-
-    # 2. Ищем контекст в базе знаний
-    context = await search_knowledge(text)
-    context_str = "\n".join(context) if context else ""
-
-    # 3. Собираем промпт
-    prompt_parts = []
-    if chat_history_str:
-        prompt_parts.append(f"История диалога:\n{chat_history_str}")
-    if context_str:
-        prompt_parts.append(f"Контекст из базы знаний:\n{context_str}")
-    prompt_parts.append(f"Вопрос пользователя: {text}")
-
-    full_prompt = "\n\n".join(prompt_parts)
-
-    # 4. Отправляем в модель
-    messages = [
-        {"role": "system", "content": (
-            "Ты — ассистент Феон. Отвечай ТОЛЬКО на русском языке. "
-            "Если в истории или контексте есть ответ — используй его. "
-            "Если вопроса нет в истории — отвечай по существу. "
-            "Никаких философских рассуждений, метафор и общих фраз. "
-            "Ответ должен быть конкретным, кратким (2-4 предложения) и полезным."
-        )},
-        {"role": "user", "content": full_prompt}
-    ]
+    # Прямая инструкция + вопрос
+    prompt = f"Ответь на вопрос прямо, без лишних слов и пояснений. Вопрос: {text}"
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://api.polza.ai/v1/chat/completions",
             headers={"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"},
             json={
-                "model": "deepseek/deepseek-v4-flash",
-                "messages": messages,
-                "temperature": 0.2,   # ниже = меньше творчества = меньше бреда
-                "max_tokens": 300
+                "model": "deepseek/deepseek-v4-flash",  # попробуйте также gpt-4o-mini или deepseek/deepseek-v3
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 100
             },
             timeout=30.0
         )
+        print(f"📤 Статус ответа Polza: {response.status_code}")
+        print(f"📤 Текст ответа Polza: {response.text}")
         response.raise_for_status()
         answer = response.json()["choices"][0]["message"]["content"].strip()
 
