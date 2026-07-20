@@ -190,42 +190,31 @@ async def process_message_core(user_id: str, text: str) -> str:
         return "Сообщение слишком длинное. Максимум 1000 символов."
 
     print(f"🧠 Запрос от {user_id}: '{text[:50]}...'")
-    
-    # Сохраняем историю, но пока НЕ используем в промпте
     save_to_history(user_id, "user", text)
-    # history = get_history(user_id, limit=6)  # закомментировано
-    # chat_history_str = ""  # не используем
 
-    # Контекст тоже пока отключаем для чистоты эксперимента
-    # context = await search_knowledge(text)  
-    context = ""  # временно
+    # ✅ Чёткая инструкция для модели
+    messages = [
+        {"role": "system", "content": "Ты — полезный ассистент. Отвечай кратко и по делу, максимум 2–3 предложения. Не используй философские рассуждения."},
+        {"role": "user", "content": text}
+    ]
 
-    # Формируем простой промпт: инструкция + вопрос
-    prompt = f"Отвечай кратко и по делу, максимум 3 предложения. Без лишней философии и рассуждений. Вопрос: {text}"
-
-    # Если контекст есть (позже вернём), можно добавить, но сейчас не надо
-    # if context:
-    #     prompt = f"Контекст: {context}\n\n{prompt}"
-
-    # Отправляем запрос без system, только user
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://api.polza.ai/v1/chat/completions",
             headers={"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"},
             json={
-                "model": "deepseek/deepseek-v4-flash",   # или попробуйте другую модель, если доступна
-                "messages": [{"role": "user", "content": prompt}],
+                "model": "deepseek/deepseek-v4-flash",  # или попробуйте gpt-4o-mini
+                "messages": messages,
                 "temperature": 0.3,
-                "max_tokens": 150
+                "max_tokens": 200
             },
             timeout=30.0
         )
         response.raise_for_status()
         answer = response.json()["choices"][0]["message"]["content"].strip()
 
-    # Если ответ пустой – заменяем
     if not answer:
-        answer = "Не удалось сгенерировать ответ."
+        answer = "Не удалось получить ответ."
 
     save_to_history(user_id, "bot", answer)
     return answer
