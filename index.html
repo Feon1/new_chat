@@ -47,7 +47,8 @@
             flex-direction: column-reverse; /* Новые сообщения сверху */
         }
 
-        #messages li {            margin-bottom: 10px;            word-wrap: break-word;
+        #messages li {            margin-bottom: 10px;
+            word-wrap: break-word;
             padding: 8px;
             border-radius: 8px;
             background-color: #e9ecef; /* Светлый фон для всех сообщений */
@@ -96,6 +97,7 @@
             color: white;
             cursor: pointer;
             border-radius: 4px;        }
+
         button:hover {
             background-color: #0056b3;
         }
@@ -120,9 +122,8 @@
             border-top: 1px solid #ddd; /* Легкая граница сверху */
         }
 
-        /* Изменён цвет ссылок на темно-синий */
         #footer a {
-            color: #003366; 
+            color: #007bff;
             text-decoration: none;
         }
 
@@ -145,7 +146,8 @@
 <body>
     <div id="chatContainer">
         <ul id="messages">            <!-- Примеры сообщений -->
-            <li class="ai-message">Привет! Это сообщение от ИИ.</li>            <li class="user-message">Привет! Это сообщение от пользователя.</li>
+            <li class="ai-message">Привет! Это сообщение от ИИ.</li>
+            <li class="user-message">Привет! Это сообщение от пользователя.</li>
             <li class="ai-message">Как дела?</li>
             <li class="user-message">Хорошо, спасибо!</li>
         </ul>
@@ -195,6 +197,7 @@
             if (messagesList.lastChild) {                 messagesList.lastChild.scrollIntoView({ behavior: 'auto', block: 'nearest' });
             }
         });
+
     </script>
 </body>
 </html>
