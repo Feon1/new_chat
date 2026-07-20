@@ -182,7 +182,7 @@ def get_history(user_id: str, limit: int = 50) -> list[dict]:
 
 
 # ==========================================
-## ==========================================
+# ==========================================
 # 🧠 УНИВЕРСАЛЬНОЕ ЯДРО ЧАТА
 # ==========================================
 async def process_message_core(user_id: str, text: str) -> str:
@@ -205,11 +205,11 @@ async def process_message_core(user_id: str, text: str) -> str:
     if context:
         prompt += f"Дополнительный КОНТЕКСТ из базы знаний:\n{context}\n\n"
 
-    prompt += f"Вопрос пользователя: {text}\n\nДай полезный, точный и развернутый ответ."
+    # Изменённая инструкция – краткость
+    prompt += f"Вопрос пользователя: {text}\n\nДай краткий, но содержательный ответ (не более 3-х предложений)."
 
-    # Формируем список сообщений: системное + пользовательское
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPT},  # глобальная установка
         {"role": "user", "content": prompt}
     ]
 
@@ -220,7 +220,8 @@ async def process_message_core(user_id: str, text: str) -> str:
             json={
                 "model": "deepseek/deepseek-v4-flash",
                 "messages": messages,
-                "temperature": 0.3
+                "temperature": 0.3,
+                "max_tokens": 350  # ограничение длины
             },
             timeout=30.0
         )
