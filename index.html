@@ -17,12 +17,11 @@
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
+            height: 100vh; /* Фиксированная высота на 100% вьюпорта */
             display: flex;
-            flex-direction: column;
-            height: 100vh; /* Высота на 100% вьюпорта */
-            box-sizing: border-box;
+            flex-direction: column; /* Основной столбец: чат -> ввод -> футер */
             overflow: hidden; /* Скрываем общий скролл body */
-            position: relative; /* Для правильного позиционирования потомков */
+            position: relative; /* Для позиционирования потомков */
         }
 
         /* Контейнер чата */
@@ -30,11 +29,11 @@
             flex: 1; /* Занимает всё доступное пространство */
             overflow-y: auto; /* Добавляем скролл только внутри контейнера чата */
             padding: 10px;
-            /* Учитываем безопасные зоны, особенно на мобильных */
+            /* Учитываем безопасные зоны */
             padding-left: env(safe-area-inset-left, 0);
             padding-right: env(safe-area-inset-right, 0);
-            /* Оставляем место внизу для fixed-элементов */
-            padding-bottom: calc(10px + env(safe-area-inset-bottom, 0) + 80px); /* 80px - примерная высота футера */
+            /* На ПК: обычный отступ. На мобильных: может понадобиться динамическая корректировка JS */
+            padding-bottom: 10px; 
             /* Псевдоэлемент для корректного скролла к новым сообщениям */
             scroll-behavior: smooth;
         }
@@ -44,7 +43,8 @@
             list-style-type: none;
             padding: 0;
             display: flex;
-            flex-direction: column-reverse; /* Новые сообщения сверху */
+            flex-direction: column; /* Сообщения в нормальном порядке: старые -> новые */
+            gap: 8px; /* Отступ между сообщениями */
         }
 
         #messages li {
@@ -72,13 +72,12 @@
             gap: 5px;
             padding: 10px;
             background-color: #f0f0f0;
-            position: fixed; /* Фиксируем внизу */
-            bottom: 40px; /* Размещаем над футером */
-            left: 0;
-            right: 0;
+            /* Не фиксируем на ПК, но готовим к фиксации на мобильных */
+            /* position: relative; на ПК */
+            /* position: fixed; bottom: 40px; на мобильных - будет через JS */
+            /* z-index будет через JS при фиксации */
             box-sizing: border-box;
             align-items: center;
-            z-index: 100; /* Выше основного контента */
             /* Учитываем безопасные зоны */
             padding-left: env(safe-area-inset-left, 0);
             padding-right: env(safe-area-inset-right, 0);
@@ -104,24 +103,22 @@
             background-color: #0056b3;
         }
 
-        /* Футер - фиксированный внизу */
+        /* Футер */
         #footer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
             text-align: center;
             padding: 8px 10px;
             /* Учитываем безопасные зоны */
             padding-left: env(safe-area-inset-left, 0);
             padding-right: env(safe-area-inset-right, 0);
             padding-bottom: max(env(safe-area-inset-bottom, 0), 10px); /* Минимальный отступ снизу */
-            background-color: rgba(240, 240, 240, 0.95); /* Сlightly transparent bg */
+            background-color: rgba(240, 240, 240, 0.95);
             color: #666;
             font-size: 0.8em;
-            z-index: 99; /* Ниже inputContainer */
-            box-shadow: 0 -1px 5px rgba(0,0,0,0.1); /* Легкая тень сверху */
-            border-top: 1px solid #ddd; /* Легкая граница сверху */
+            box-shadow: 0 -1px 5px rgba(0,0,0,0.1);
+            border-top: 1px solid #ddd;
+            /* position: relative; на ПК */
+            /* position: fixed; bottom: 0; на мобильных - будет через JS */
+            /* z-index будет через JS при фиксации */
         }
 
         #footer a {
@@ -141,6 +138,29 @@
 
         #messages li {
           animation: fadeIn 0.2s ease-out forwards;
+        }
+
+        /* Стили для мобильных, когда элементы фиксируются */
+        .mobile-layout #chatContainer {
+            /* На мобильных, когда input и footer фиксированы, chatContainer нужно уменьшить */
+            height: calc(100vh - 120px - env(safe-area-inset-bottom, 0px)); /* Примерная высота input + footer */
+            overflow-y: auto; /* Убедиться, что скролл работает */
+        }
+
+        .mobile-layout #inputContainer {
+            position: fixed;
+            bottom: 40px; /* Под футером */
+            left: 0;
+            right: 0;
+            z-index: 100;
+        }
+
+        .mobile-layout #footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 99;
         }
 
     </style>
@@ -178,12 +198,13 @@
             const messageItem = document.createElement('li');
             messageItem.textContent = messageText;
             messageItem.classList.add('user-message'); // Добавляем класс для стилизации
-            messagesList.insertBefore(messageItem, messagesList.firstChild); // Добавляем в начало списка
+            messagesList.appendChild(messageItem); // Добавляем в конец списка
 
             // Очищаем поле ввода
             inputElement.value = '';
+            inputElement.focus(); // Фокус обратно на поле ввода
 
-            // Прокручиваем к новому сообщению (теперь это первый элемент)
+            // Прокручиваем к новому сообщению (в конец списка)
             messageItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
@@ -194,13 +215,45 @@
             }
         });
 
-        // При загрузке прокручиваем к последнему сообщению (теперь это последний элемент из-за flex-direction: column-reverse)
+        // --- Логика адаптации под мобильные устройства ---
+        let isMobileLayoutActive = false;
+
+        function updateMobileLayout() {
+            const isMobile = window.innerWidth <= 768 || window.matchMedia('(max-height: 500px)').matches; // Примерный критерий
+
+            if (isMobile && !isMobileLayoutActive) {
+                document.body.classList.add('mobile-layout');
+                isMobileLayoutActive = true;
+                console.log("Переключено на мобильный макет");
+            } else if (!isMobile && isMobileLayoutActive) {
+                document.body.classList.remove('mobile-layout');
+                isMobileLayoutActive = false;
+                console.log("Переключено на ПК макет");
+            }
+        }
+
+        // Запускаем при загрузке
         window.addEventListener('load', () => {
+            updateMobileLayout();
+            // Прокручиваем к последнему сообщению при загрузке
             const messagesList = document.getElementById('messages');
             if (messagesList.lastChild) {
                  messagesList.lastChild.scrollIntoView({ behavior: 'auto', block: 'nearest' });
             }
         });
+
+        // Обновляем макет при изменении размера окна
+        window.addEventListener('resize', updateMobileLayout);
+
+        // Дополнительно: попробовать обнаружить открытие клавиатуры (ненадёжный способ)
+        // window.addEventListener('focusin', (e) => {
+        //     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        //         setTimeout(updateMobileLayout, 300); // Небольшая задержка для срабатывания resize
+        //     }
+        // });
+        // window.addEventListener('focusout', () => {
+        //     setTimeout(updateMobileLayout, 300);
+        // });
 
     </script>
 </body>
