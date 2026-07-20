@@ -432,12 +432,14 @@ async def upload_document(file: UploadFile = File(...)):
 async def query(request: Request):
     try:
         data = await request.json()
-        user_input = data.get("message", "")
-        # ...
+        text = data.get("message", "")
+        user_id = data.get("user_id", "web")
+        answer = await process_message_core(user_id, text)
         return {"response": answer}
     except Exception as e:
         logger.error(f"Ошибка в /query: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Возвращаем понятное сообщение об ошибке, но не пытаемся использовать answer
+        return {"response": "Извините, произошла внутренняя ошибка. Попробуйте позже."}, 500
 
 @app.get("/get_history")
 async def get_history_endpoint(user_id: str):
