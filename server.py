@@ -227,7 +227,7 @@ async def process_message_core(user_id: str, text: str) -> str:
         )
         response.raise_for_status()
         answer = response.json()["choices"][0]["message"]["content"]
-
+        print(f"🧾 Ответ от Polza: '{answer}'") 
     save_to_history(user_id, "bot", answer)
     return answer
 
