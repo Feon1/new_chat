@@ -192,10 +192,37 @@ async def process_message_core(user_id: str, text: str) -> str:
     print(f"🧠 Запрос от {user_id}: '{text[:50]}...'")
     save_to_history(user_id, "user", text)
 
-    # ✅ Чёткая инструкция для модели
+    # 1. Загружаем историю (последние 4 сообщения)
+    history = get_history(user_id, limit=4)
+    chat_history_str = ""
+    for msg in history:
+        role = "Пользователь" if msg['role'] == 'user' else "Ассистент"
+        chat_history_str += f"{role}: {msg['content']}\n"
+
+    # 2. Ищем контекст в базе знаний
+    context = await search_knowledge(text)
+    context_str = "\n".join(context) if context else ""
+
+    # 3. Собираем промпт
+    prompt_parts = []
+    if chat_history_str:
+        prompt_parts.append(f"История диалога:\n{chat_history_str}")
+    if context_str:
+        prompt_parts.append(f"Контекст из базы знаний:\n{context_str}")
+    prompt_parts.append(f"Вопрос пользователя: {text}")
+
+    full_prompt = "\n\n".join(prompt_parts)
+
+    # 4. Отправляем в модель
     messages = [
-        {"role": "system", "content": "Ты — полезный ассистент. Отвечай кратко и по делу, максимум 2–3 предложения. Не используй философские рассуждения."},
-        {"role": "user", "content": text}
+        {"role": "system", "content": (
+            "Ты — ассистент Феон. Отвечай ТОЛЬКО на русском языке. "
+            "Если в истории или контексте есть ответ — используй его. "
+            "Если вопроса нет в истории — отвечай по существу. "
+            "Никаких философских рассуждений, метафор и общих фраз. "
+            "Ответ должен быть конкретным, кратким (2-4 предложения) и полезным."
+        )},
+        {"role": "user", "content": full_prompt}
     ]
 
     async with httpx.AsyncClient() as client:
@@ -203,10 +230,10 @@ async def process_message_core(user_id: str, text: str) -> str:
             "https://api.polza.ai/v1/chat/completions",
             headers={"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"},
             json={
-                "model": "deepseek/deepseek-v4-flash",  # или попробуйте gpt-4o-mini
+                "model": "deepseek/deepseek-v4-flash",
                 "messages": messages,
-                "temperature": 0.3,
-                "max_tokens": 200
+                "temperature": 0.2,   # ниже = меньше творчества = меньше бреда
+                "max_tokens": 300
             },
             timeout=30.0
         )
