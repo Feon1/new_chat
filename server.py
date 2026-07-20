@@ -194,24 +194,26 @@ async def process_message_core(user_id: str, text: str) -> str:
     print(f"🧠 Запрос от {user_id}: '{text[:50]}...'")
     save_to_history(user_id, "user", text)
 
-    # Прямая инструкция + вопрос
-    prompt = f"Ответь на вопрос прямо, без лишних слов и пояснений. Вопрос: {text}"
-
+    # system – краткая инструкция, user – чистый вопрос
+    messages = [
+        {"role": "system", "content": "Ты — ассистент. Отвечай на вопрос пользователя кратко и по существу, максимум 2-3 предложения. Без философии и лишних пояснений."},
+        {"role": "user", "content": text}
+    ]
+    print(f"📤 Отправка в Polza: system='{messages[0]['content']}', user='{messages[1]['content']}'")
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://api.polza.ai/v1/chat/completions",
             headers={"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"},
             json={
-                "model": "deepseek/deepseek-v4-flash",  # попробуйте также gpt-4o-mini или deepseek/deepseek-v3
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "max_tokens": 100
+                "model": "deepseek/deepseek-v4-flash",
+                "messages": messages,
+                "temperature": 0.3,
+                "max_tokens": 150
             },
             timeout=30.0
         )
-        print(f"📤 Статус ответа Polza: {response.status_code}")
-        print(f"📤 Текст ответа Polza: {response.text}")
         response.raise_for_status()
+        
         answer = response.json()["choices"][0]["message"]["content"].strip()
 
     if not answer:
@@ -423,6 +425,7 @@ async def query(request: Request):
         data = await request.json()
         text = data.get("message", "")
         user_id = data.get("user_id", "web")
+        
         answer = await process_message_core(user_id, text)
         return {"response": answer}
     except Exception as e:
