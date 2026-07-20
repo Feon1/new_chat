@@ -18,58 +18,6 @@
             overflow: hidden; /* Чтобы не было скролла во время загрузки */
         }
 
-                        /* Футер в фиолетовых тонах */
-        .footer-links {
-            position: fixed !important;
-            bottom: 20px !important;
-            left: 50% !important;
-            transform: translateX(-50%) !important;
-            z-index: 9999 !important;
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            flex-wrap: wrap;
-            justify-content: center;
-            width: 95%;
-            text-align: center;
-        }
-        .footer-link {
-            font-size: 14px;
-            color: #ffffff;
-            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
-            font-weight: 500;
-            text-decoration: none;
-            opacity: 0.9;
-            transition: all 0.2s;
-        }
-        .footer-link:hover { 
-            opacity: 1; 
-            text-decoration: underline;
-            color: #CE93D8; /* светло-фиолетовый при наведении */
-        }
-        .footer-divider {
-            color: rgba(206, 147, 216, 0.8); /* фиолетовые разделители */
-            font-size: 14px;
-        }
-        .footer-donate {
-            font-size: 14px;
-            color: #CE93D8; /* фиолетовый для Donate */
-            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
-            font-weight: 600;
-        }
-
-        @media (max-width: 600px) {
-            .footer-links {
-                bottom: 10px !important;
-                gap: 6px !important;
-                font-size: 12px;
-            }
-            .footer-link, .footer-divider, .footer-donate {
-                font-size: 12px !important;
-            }
-        
-        }
-
         /* Глобальный экран подключения */
         .global-overlay {
             position: fixed;
@@ -123,65 +71,71 @@
             font-size: 16px;
         }
 
-               /* Кнопка открытия чата - фиолетовая */
+        /* Кнопка открытия чата (скрыта по умолчанию) */
         .chat-launcher {
             position: fixed;
             bottom: 30px; right: 30px;
             width: 60px; height: 60px;
-            background: #9C27B0;
+            background: white;
             border-radius: 50%;
             border: none;
-            color: white;
+            color: #667eea;
             font-size: 28px;
             cursor: pointer;
-            box-shadow: 0 4px 20px rgba(156, 39, 176, 0.4);
-            transition: transform 0.3s, background 0.3s;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            transition: transform 0.3s;
             z-index: 1000;
-            display: none;
-            align-items: center;
-            justify-content: center;
+            display: none; /* Скрыта до подключения */
         }
-        .chat-launcher.visible { display: flex; }
-        .chat-launcher:hover { transform: scale(1.1); background: #7B1FA2; }
 
-        /* Шапка чата - глубокий фиолетовый */
+        .chat-launcher.visible { display: flex; align-items: center; justify-content: center; }
+        .chat-launcher:hover { transform: scale(1.1); }
+
+        /* Виджет чата */
+        .chat-widget {
+            position: fixed;
+            bottom: 30px; right: 30px;
+            width: 380px; height: 600px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 1000;
+        }
+
+        .chat-widget.open { display: flex; }
+
+        /* Шапка чата */
         .chat-header {
-            background: #6A1B9A;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white; padding: 16px 20px;
             display: flex; justify-content: space-between; align-items: center;
         }
         .chat-header .title { font-size: 18px; font-weight: 600; }
-        .chat-header .status { display: flex; align-items: center; gap: 8px; font-size: 13px; opacity: 0.95; }
+        .chat-header .status { display: flex; align-items: center; gap: 8px; font-size: 12px; opacity: 0.9; }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #4CAF50; box-shadow: 0 0 8px rgba(76,175,80,0.8); }
-        .close-btn { background: none; border: none; color: white; font-size: 24px; cursor: pointer; padding: 0; line-height: 1; }
-        .close-btn:hover { opacity: 0.8; }
+        .close-btn { background: none; border: none; color: white; font-size: 24px; cursor: pointer; }
 
-        /* Сообщения пользователя - фиолетовые */
-        .message.user .message-content { background: #6A1B9A; color: white; border-bottom-right-radius: 4px; }
+        /* Сообщения */
+        .messages { flex: 1; overflow-y: auto; padding: 20px; background: #f8f9fa; }
+        .message { margin-bottom: 15px; display: flex; flex-direction: column; }
+        .message.user { align-items: flex-end; }
+        .message.bot { align-items: flex-start; }
+        .message-content { max-width: 80%; padding: 12px 16px; border-radius: 16px; font-size: 14px; line-height: 1.5; word-wrap: break-word; }
+        .message.user .message-content { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-bottom-right-radius: 4px; }
+        .message.bot .message-content { background: white; color: #333; border-bottom-left-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .message-time { font-size: 11px; color: #999; margin-top: 5px; padding: 0 5px; }
 
-        /* Индикатор набора - фиолетовый */
-        .typing-indicator span { background: #9C27B0; }
-
-        /* Поле ввода - фиолетовый фокус */
-        .input-area textarea:focus { border-color: #9C27B0; }
-
-        /* Кнопка отправки - фиолетовая */
-        .input-area button { 
-            background: #6A1B9A; 
-        }
-        .input-area button:hover:not(:disabled) { 
-            background: #4A148C; 
-        }
-
-        /* Спиннер загрузки - фиолетовый */
-        .global-spinner {
-            border-top: 5px solid #9C27B0;
-        }
-
-        /* Успешное подключение - фиолетовый */
-        .global-content .success {
-            color: #CE93D8;
-        }
+        /* Индикатор набора */
+        .typing-indicator { display: none; padding: 15px 20px; background: #f8f9fa; }
+        .typing-indicator.active { display: flex; gap: 5px; align-items: center; }
+        .typing-indicator span { width: 8px; height: 8px; border-radius: 50%; background: #667eea; animation: bounce 1.4s infinite ease-in-out; }
+        .typing-indicator span:nth-child(1) { animation-delay: 0s; }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
 
         /* Область ввода */
         .input-area { padding: 15px 20px; background: white; border-top: 1px solid #e0e0e0; display: flex; gap: 10px; align-items: flex-end; }
@@ -241,23 +195,53 @@
     </div>
 
 
-   
-    <script>
-    (function(){
-        // Элементы DOM
-        const globalOverlay = document.getElementById('globalOverlay');
-        const globalStatus = document.getElementById('globalStatus');
-        const launcherBtn = document.getElementById('launcherBtn');
-        const chatWidget = document.getElementById('chatWidget');
-        const closeChatBtn = document.getElementById('closeChatBtn');
-        const messages = document.getElementById('messages');
-        const messageInput = document.getElementById('messageInput');
-        const sendButton = document.getElementById('sendButton');
-        const typingIndicator = document.getElementById('typingIndicator');
+           /* Футер, жестко прижатый к низу экрана */
+        .footer-links {
+            position: fixed !important;
+            bottom: 20px !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            z-index: 9999 !important;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+            width: 95%;
+            text-align: center;
+        }
+        .footer-link {
+            font-size: 14px;
+            color: #ffffff;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+            font-weight: 500;
+            text-decoration: none;
+            opacity: 0.9;
+            transition: opacity 0.2s;
+        }
+        .footer-link:hover { opacity: 1; text-decoration: underline; }
+        .footer-divider {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+        }
+        .footer-donate {
+            font-size: 14px;
+            color: #ff6b6b;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+            font-weight: 600;
+        }
 
-        const API_URL = 'https://docker-new-chat.onrender.com/query';
-        const HISTORY_URL = 'https://docker-new-chat.onrender.com/get_history';
-        const PING_URL = 'https://docker-new-chat.onrender.com/';
+        /* Адаптация для мобильных, чтобы текст не вылезал за края */
+        @media (max-width: 600px) {
+            .footer-links {
+                bottom: 10px !important;
+                gap: 6px !important;
+                font-size: 12px;
+            }
+            .footer-link, .footer-divider, .footer-donate {
+                font-size: 12px !important;
+            }
+        }
 
         // ==========================================
 // СТАБИЛЬНАЯ ГЕНЕРАЦИЯ USER ID (LocalStorage + Cookie)
@@ -467,18 +451,5 @@ const userId = getStableUserId();
         });
     })();
     </script>
-
-        <!-- Футер с ссылками (должен быть прямо перед </body>) -->
-    <div class="footer-links">
-        <span class="footer-donate">❤️ Donate</span>
-        <span class="footer-divider">|</span>
-        <a href="https://yoomoney.ru/to/4100119548371455" target="_blank" class="footer-link">💳 ЮMoney: 4100119548371455</a>
-        <span class="footer-divider">|</span>
-        <a href="mailto:feon.5upport@ya.ru" class="footer-link">📧 support:feon.5upport@ya.ru</a>
-        <span class="footer-divider">|</span>
-        <a href="https://vk.ru/feon_community" target="_blank" class="footer-link">💬 Группа ВКонтакте</a>
-    </div>
-</body>
-</html>
 </body>
 </html>
