@@ -1,86 +1,54 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Чат (Мобильная версия)</title>
-    <!-- Оптимизация для мобильных устройств -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Feon Chat</title>
+    <!-- Добавлен viewport-fit=cover -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <style>
-        /* Сброс стандартных стилей */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
         body {
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
             display: flex;
-            flex-direction: column;
+            flex-direction: column; /* Располагаем элементы вертикально */
             height: 100vh; /* Высота на 100% вьюпорта */
-            box-sizing: border-box;
+            box-sizing: border-box; /* Учитываем padding и border в расчёте высоты */
             overflow: hidden; /* Скрываем общий скролл body */
-            position: relative; /* Для правильного позиционирования потомков */
         }
 
-        /* Контейнер чата */
         #chatContainer {
             flex: 1; /* Занимает всё доступное пространство */
             overflow-y: auto; /* Добавляем скролл только внутри контейнера чата */
             padding: 10px;
-            /* Учитываем безопасные зоны, особенно на мобильных */
-            padding-left: env(safe-area-inset-left, 0);
-            padding-right: env(safe-area-inset-right, 0);
-            /* Оставляем место внизу для fixed-элементов */
-            padding-bottom: calc(10px + env(safe-area-inset-bottom, 0) + 80px); /* 80px - примерная высота футера */
-            /* Псевдоэлемент для корректного скролла к новым сообщениям */
-            scroll-behavior: smooth;
+            padding-bottom: calc(10px + env(safe-area-inset-bottom, 0)); /* Отступ снизу с учётом safe area */
+            margin-bottom: 80px; /* Добавляем отступ снизу, равный высоте футера */
         }
 
-        /* Список сообщений */
         #messages {
             list-style-type: none;
             padding: 0;
-            display: flex;
-            flex-direction: column-reverse; /* Новые сообщения сверху */
         }
 
-        #messages li {            margin-bottom: 10px;
-            word-wrap: break-word;
-            padding: 8px;
-            border-radius: 8px;
-            background-color: #e9ecef; /* Светлый фон для всех сообщений */
-            max-width: 80%;
+        #messages li {
+            margin-bottom: 10px;
+            word-wrap: break-word; /* Перенос длинных слов */
         }
 
-        #messages li.user-message {
-            align-self: flex-end; /* Сообщения пользователя справа */
-            background-color: #d1ecf1;
-        }
-
-        #messages li.ai-message {
-            align-self: flex-start; /* Сообщения ИИ слева */
-            background-color: #f8d7da;
-        }
-
-        /* Контейнер ввода */
         #inputContainer {
             display: flex;
             gap: 5px;
             padding: 10px;
             background-color: #f0f0f0;
-            position: fixed; /* Фиксируем внизу */
-            bottom: 40px; /* Размещаем над футером */
+            position: fixed; /* Фиксируем контейнер ввода внизу */
+            bottom: 0; /* Прижимаем к низу */
             left: 0;
             right: 0;
             box-sizing: border-box;
-            align-items: center;
-            z-index: 100; /* Выше основного контента */
-            /* Учитываем безопасные зоны */
-            padding-left: env(safe-area-inset-left, 0);
-            padding-right: env(safe-area-inset-right, 0);
+            align-items: center; /* Выравнивание по вертикали */
+            /* Учитываем безопасные зоны для нижнего края */
+            padding-left: env(safe-area-inset-left, 0);            padding-right: env(safe-area-inset-right, 0);
+            padding-bottom: max(env(safe-area-inset-bottom, 0), 10px); /* Минимальный отступ снизу */
         }
 
         #messageInput {
@@ -96,28 +64,31 @@
             background-color: #007bff;
             color: white;
             cursor: pointer;
-            border-radius: 4px;        }
+            border-radius: 4px;
+        }
 
         button:hover {
             background-color: #0056b3;
         }
 
-        /* Футер - фиксированный внизу */
+        /* --- Стили для футера --- */
         #footer {
-            position: fixed;
-            bottom: 0;
+            position: fixed; /* Фиксируем футер внизу экрана */
+            bottom: 0; /* Прижимаем к низу */
             left: 0;
             right: 0;
             text-align: center;
             padding: 8px 10px;
+            padding-top: calc(8px + env(safe-area-inset-top, 0)); /* Отступ сверху с учётом safe area, если нужно */
             /* Учитываем безопасные зоны */
             padding-left: env(safe-area-inset-left, 0);
             padding-right: env(safe-area-inset-right, 0);
             padding-bottom: max(env(safe-area-inset-bottom, 0), 10px); /* Минимальный отступ снизу */
-            background-color: rgba(240, 240, 240, 0.95); /* Сlightly transparent bg */
+            background-color: rgba(240, 240, 240, 0.9); /* Светло-серый фон с небольшой прозрачностью */
+            backdrop-filter: blur(5px); /* Эффект размытия фона (опционально) */
             color: #666;
             font-size: 0.8em;
-            z-index: 99; /* Ниже inputContainer */
+            z-index: 1000; /* Высокий z-index, чтобы футер был поверх других элементов */
             box-shadow: 0 -1px 5px rgba(0,0,0,0.1); /* Легкая тень сверху */
             border-top: 1px solid #ddd; /* Легкая граница сверху */
         }
@@ -126,31 +97,55 @@
             color: #007bff;
             text-decoration: none;
         }
-
         #footer a:hover {
             text-decoration: underline;
         }
 
-        /* Простая анимация для новых сообщений */
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
+        /* --- Медиа-запрос для мобильных устройств --- */
+        @media (max-width: 768px) {
+            #chatContainer {
+                /* Увеличиваем отступ, если футер фиксирован и имеет высоту ~80px */
+                /* margin-bottom уже установлен в 80px выше, этого достаточно */
+                /* padding-bottom можно увеличить, если футер НЕ фиксирован и должен просто сдвигать контент */
+            }
+
+            #inputContainer,
+            #footer { /* Применяем стили к обоим нижним элементам */
+                /* Убедимся, что они не выходят за границы экрана */
+                width: 100%;
+                max-width: 100vw;
+                box-sizing: border-box;
+            }
+            #inputContainer {
+                /* Уже fixed, высота зависит от содержимого */
+            }
+             /* Если футер fixed, его высоту нужно учесть в margin-bottom чата */
+             /* Но если он fixed, он не влияет на нормальный поток, поэтому margin-bottom в #chatContainer решающий */
+             /* Если FOOTER static/relative, тогда margin-bottom на #inputContainer или padding-bottom на body */
         }
 
-        #messages li {
-          animation: fadeIn 0.2s ease-out forwards;
+        /* Дополнительно: Стилизация скроллбара (опционально) */
+        #chatContainer::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #chatContainer::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        #chatContainer::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+
+        #chatContainer::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
         }
 
     </style>
 </head>
 <body>
-    <div id="chatContainer">
-        <ul id="messages">            <!-- Примеры сообщений -->
-            <li class="ai-message">Привет! Это сообщение от ИИ.</li>
-            <li class="user-message">Привет! Это сообщение от пользователя.</li>
-            <li class="ai-message">Как дела?</li>
-            <li class="user-message">Хорошо, спасибо!</li>
-        </ul>
+    <div id="chatContainer">        <ul id="messages"></ul>
     </div>
 
     <div id="inputContainer">
@@ -158,46 +153,27 @@
         <button onclick="sendMessage()">Отправить</button>
     </div>
 
+    <!-- Футер перемещён в конец body и сделан fixed -->
     <div id="footer">
         <a href="/privacy">Политика конфиденциальности</a> |
         <a href="/terms">Условия использования</a> |
-        <span>© 2024 Чат</span>
+        <span>© 2024 Simple Chat</span>
     </div>
 
     <script>
-        // Простой скрипт для добавления новых сообщений
-        function sendMessage() {
-            const inputElement = document.getElementById('messageInput');
-            const messageText = inputElement.value.trim();
-            if (!messageText) return;
+        // ... (ваш существующий JavaScript код) ...
 
+        function addMessage(message) {
             const messagesList = document.getElementById('messages');
             const messageItem = document.createElement('li');
-            messageItem.textContent = messageText;
-            messageItem.classList.add('user-message'); // Добавляем класс для стилизации
-            messagesList.insertBefore(messageItem, messagesList.firstChild); // Добавляем в начало списка
+            messageItem.textContent = message;
+            messagesList.appendChild(messageItem);
 
-            // Очищаем поле ввода
-            inputElement.value = '';
-
-            // Прокручиваем к новому сообщению (теперь это первый элемент)
-            messageItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            // Прокручиваем вниз после добавления сообщения
+            messagesList.scrollTop = messagesList.scrollHeight;
         }
 
-        // Обработка нажатия Enter в поле ввода
-        document.getElementById('messageInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                sendMessage();
-            }
-        });
-
-        // При загрузке прокручиваем к последнему сообщению (теперь это последний элемент из-за flex-direction: column-reverse)
-        window.addEventListener('load', () => {
-            const messagesList = document.getElementById('messages');
-            if (messagesList.lastChild) {                 messagesList.lastChild.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-            }
-        });
-
+        // ... (остальной JavaScript код) ...
     </script>
 </body>
 </html>
