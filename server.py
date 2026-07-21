@@ -26,6 +26,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Переменные для MAX
+MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN")
+MAX_WEBHOOK_URL = os.getenv("MAX_WEBHOOK_URL")
+
 # Получаем токены из переменных окружения
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
