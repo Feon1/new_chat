@@ -10,3 +10,4 @@ COPY . .
 EXPOSE 10000
 
 CMD ["python", "server.py"]
+RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates
