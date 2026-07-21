@@ -329,17 +329,9 @@ async def max_webhook(request: Request):
 # 🔷 MAX ИНТЕГРАЦИЯ (финальная версия)
 # ==========================================
 
-# Пытаемся использовать сертификаты, но если не получается - переключаемся на verify=False
-try:
-    import certifi
-    import ssl
-    SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
-    print(f"✅ SSL контекст создан с сертификатами из certifi")
-    USE_SSL = True
-except Exception as e:
-    print(f"⚠️ Не удалось создать SSL контекст: {e}")
-    SSL_CONTEXT = None
-    USE_SSL = False
+# ==========================================
+# 🔷 MAX ИНТЕГРАЦИЯ (с принудительным отключением SSL)
+# ==========================================
 
 async def set_max_webhook():
     """Устанавливает вебхук для MAX бота"""
@@ -354,12 +346,8 @@ async def set_max_webhook():
     }
     payload = {"url": MAX_WEBHOOK_URL}
 
-    # Решаем, использовать ли SSL проверку
-    verify_param = SSL_CONTEXT if USE_SSL else False
-    if not USE_SSL:
-        print("⚠️ Используем verify=False (SSL проверка отключена)")
-
-    async with httpx.AsyncClient(timeout=10.0, verify=verify_param) as client:
+    # Принудительно отключаем проверку SSL
+    async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
         try:
             response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
@@ -380,16 +368,14 @@ async def send_max_message(chat_id: str, text: str):
     }
     payload = {"chat_id": chat_id, "text": text}
 
-    verify_param = SSL_CONTEXT if USE_SSL else False
-
-    async with httpx.AsyncClient(timeout=10.0, verify=verify_param) as client:
+    # Принудительно отключаем проверку SSL
+    async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
         try:
             response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             print(f"✅ Сообщение отправлено в MAX (chat {chat_id})")
         except Exception as e:
             print(f"❌ Ошибка отправки в MAX: {e}")
-
 
 # ==========================================
 # 💬 ВКОНТАКТЕ ИНТЕГРАЦИЯ
