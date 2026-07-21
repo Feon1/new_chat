@@ -325,28 +325,21 @@ async def max_webhook(request: Request):
 # ==========================================
 # 🔷 MAX ИНТЕГРАЦИЯ
 # ==========================================
+# ==========================================
+# 🔷 MAX ИНТЕГРАЦИЯ (финальная версия)
+# ==========================================
+
+# Пытаемся использовать сертификаты, но если не получается - переключаемся на verify=False
 try:
     import certifi
-    CA_BUNDLE = certifi.where()
-    print(f"✅ Сертификаты загружены из: {CA_BUNDLE}")
-except ImportError:
-    CA_BUNDLE = None
-    print("⚠️ certifi не установлен, попробуем системный путь")
-
-# Если certifi не сработал, пробуем системный путь
-if not CA_BUNDLE:
-    import os
-    if os.path.exists("/etc/ssl/certs/ca-certificates.crt"):
-        CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
-    elif os.path.exists("/etc/pki/tls/certs/ca-bundle.crt"):
-        CA_BUNDLE = "/etc/pki/tls/certs/ca-bundle.crt"
-
-# Создаём SSL-контекст с сертификатами
-if CA_BUNDLE:
-    ssl_context = ssl.create_default_context(cafile=CA_BUNDLE)
-else:
-    ssl_context = None
-    print("⚠️ Не удалось найти сертификаты, будет использован verify=False")
+    import ssl
+    SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+    print(f"✅ SSL контекст создан с сертификатами из certifi")
+    USE_SSL = True
+except Exception as e:
+    print(f"⚠️ Не удалось создать SSL контекст: {e}")
+    SSL_CONTEXT = None
+    USE_SSL = False
 
 async def set_max_webhook():
     """Устанавливает вебхук для MAX бота"""
@@ -361,12 +354,10 @@ async def set_max_webhook():
     }
     payload = {"url": MAX_WEBHOOK_URL}
 
-    # Выбираем метод проверки SSL
-    if ssl_context:
-        verify_param = ssl_context
-    else:
-        verify_param = False
-        print("⚠️ Используем verify=False (небезопасно, только для теста)")
+    # Решаем, использовать ли SSL проверку
+    verify_param = SSL_CONTEXT if USE_SSL else False
+    if not USE_SSL:
+        print("⚠️ Используем verify=False (SSL проверка отключена)")
 
     async with httpx.AsyncClient(timeout=10.0, verify=verify_param) as client:
         try:
@@ -389,10 +380,7 @@ async def send_max_message(chat_id: str, text: str):
     }
     payload = {"chat_id": chat_id, "text": text}
 
-    if ssl_context:
-        verify_param = ssl_context
-    else:
-        verify_param = False
+    verify_param = SSL_CONTEXT if USE_SSL else False
 
     async with httpx.AsyncClient(timeout=10.0, verify=verify_param) as client:
         try:
