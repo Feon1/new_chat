@@ -114,8 +114,8 @@ async def startup_event():
     else:
         print("⚠️ Переменные TELEGRAM_BOT_TOKEN или WEBHOOK_URL не найдены.")
     if MAX_BOT_TOKEN:
-        await set_max_webhook() 
-     else:
+       await set_max_webhook() 
+    else:
         print("⚠️ Переменные MAX_TOKEN или WEBHOOK_URL не найдены.")    
 
 
