@@ -339,7 +339,7 @@ async def set_max_webhook():
         print("⚠️ MAX_BOT_TOKEN или MAX_WEBHOOK_URL не заданы, пропускаем")
         return
 
-    url = "https://platform-api2.max.ru/webhook"
+    url = "https://platform-api2.max.ru/subscriptions"
     headers = {
         "Authorization": MAX_BOT_TOKEN,
         "Content-Type": "application/json"
