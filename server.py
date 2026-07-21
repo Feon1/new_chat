@@ -370,21 +370,24 @@ async def send_max_message(chat_id: str, text: str):
         print("❌ MAX_BOT_TOKEN не задан")
         return
 
-    url = "https://platform-api2.max.ru/messages"
+    # 1. Добавляем chat_id как параметр URL
+    url = f"https://platform-api2.max.ru/messages?chat_id={chat_id}"
     headers = {
         "Authorization": MAX_BOT_TOKEN,
         "Content-Type": "application/json"
     }
-    payload = {"chat_id": chat_id, "text": text}
+    # 2. В теле запроса оставляем только текст сообщения
+    payload = {"text": text}
 
-    # Принудительно отключаем проверку SSL
     async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
         try:
             response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             print(f"✅ Сообщение отправлено в MAX (chat {chat_id})")
+            return response.json()
         except Exception as e:
             print(f"❌ Ошибка отправки в MAX: {e}")
+            return None
 
 # ==========================================
 # 💬 ВКОНТАКТЕ ИНТЕГРАЦИЯ
