@@ -238,6 +238,77 @@ async def startup_event():
     
     logger.info("✅ Сервер успешно запущен!")
 
+# ... ваш существующий код ...
+
+# ---------- ЭНДПОИНТЫ ДЛЯ ФРОНТЕНДА ----------
+
+@app.get("/")
+async def root():
+    """Корневой эндпоинт для проверки работы сервера"""
+    return {"status": "ok", "message": "Сервер работает"}
+
+@app.post("/query")
+async def handle_query(request: Request):
+    """
+    Эндпоинт для обработки запросов от фронтенда.
+    Ожидает JSON: {"user_id": "...", "message": "..."}
+    """
+    try:
+        data = await request.json()
+        user_id = data.get("user_id")
+        message = data.get("message")
+        
+        if not user_id or not message:
+            raise HTTPException(status_code=400, detail="Не указаны user_id или message")
+        
+        # Генерируем ответ через вашу существующую логику
+        answer = await process_message_core(user_id, message)
+        
+        return {"response": answer}
+    except Exception as e:
+        logger.error(f"Ошибка в /query: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/get_history")
+async def get_history(user_id: str):
+    """
+    Эндпоинт для получения истории чата пользователя.
+    Ожидает параметр: ?user_id=...
+    """
+    try:
+        # Ищем историю для данного user_id в Qdrant
+        # Используем filter для поиска по user_id
+        from qdrant_client.http import models as qdrant_models
+        
+        scroll_result = qdrant_client.scroll(
+            collection_name="chat_history",
+            scroll_filter=qdrant_models.Filter(
+                must=[
+                    qdrant_models.FieldCondition(
+                        key="user_id",
+                        match=qdrant_models.MatchValue(value=user_id)
+                    )
+                ]
+            ),
+            limit=100,  # Максимальное количество сообщений
+            with_payload=True,
+            with_vectors=False
+        )
+        
+        history = []
+        for point in scroll_result[0]:
+            payload = point.payload
+            history.append({
+                "query": payload.get("query", ""),
+                "answer": payload.get("answer", ""),
+                "timestamp": payload.get("timestamp", "")
+            })
+        
+        return {"history": history}
+    except Exception as e:
+        logger.error(f"Ошибка в /get_history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ---------- ТОЧКА ВХОДА ----------
 if __name__ == "__main__":
     import os
