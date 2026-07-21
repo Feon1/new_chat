@@ -8,8 +8,9 @@ from datetime import datetime
 import uvicorn
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from sentence_transformers import SentenceTransformer
+# from sentence_transformers import SentenceTransformer
 import numpy as np
+from light_embed import TextEmbedding
 
 # ---------- НАСТРОЙКА ЛОГГИРОВАНИЯ ----------
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +31,7 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
 # ---------- МОДЕЛЬ ЭМБЕДДИНГОВ ----------
-embedding_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', model_kwargs={'torch_dtype': 'torch.float16'})
+embedding_model = TextEmbedding('LightEmbed/sbert-paraphrase-multilingual-MiniLM-L12-v2-onnx')
 
 # ---------- FASTAPI APP ----------
 app = FastAPI(title="XiaoZhi RAG Adapter")
@@ -44,7 +45,8 @@ app.add_middleware(
 
 # ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (ваша логика) ----------
 def get_embedding(text: str) -> list:
-    return embedding_model.encode(text).tolist()
+    embedding = embedding_model.encode([text])[0]  # получаем numpy-массив
+    return embedding.tolist()
 
 async def search_knowledge(query: str, top_k: int = 5) -> list:
     query_vector = get_embedding(query)
