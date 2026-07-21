@@ -30,7 +30,7 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
 # ---------- МОДЕЛЬ ЭМБЕДДИНГОВ ----------
-embedding_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+embedding_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', model_kwargs={'torch_dtype': 'torch.float16'})
 
 # ---------- FASTAPI APP ----------
 app = FastAPI(title="XiaoZhi RAG Adapter")
