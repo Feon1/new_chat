@@ -13,10 +13,11 @@ pypdf
 python-docx
 supabase
 httpx>=0.24.0
-sentence-transformers
-torch
-transformers
+# sentence-transformers
+# torch
+# transformers
 numpy
 # light-embed
+fastembed
 
 
