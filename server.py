@@ -33,7 +33,7 @@ qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
 # ---------- МОДЕЛЬ ЭМБЕДДИНГОВ ----------
 
-embedding_model = TextEmbedding(model_name="intfloat/multilingual-e5-small")
+embedding_model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 # ---------- FASTAPI APP ----------
 app = FastAPI(title="XiaoZhi RAG Adapter")
