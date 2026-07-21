@@ -3,6 +3,7 @@ import json
 import asyncio
 import uuid
 import random
+import traceback
 from datetime import datetime
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -47,6 +48,12 @@ QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 POLZA_API_KEY = os.getenv("POLZA_API_KEY")
 JINA_API_KEY = os.getenv("JINA_API_KEY")
+
+# Проверяем наличие ключей при старте (но не прерываем запуск)
+if not POLZA_API_KEY:
+    print("⚠️ WARNING: POLZA_API_KEY не задан. Бот не сможет отвечать.")
+if not JINA_API_KEY:
+    print("⚠️ WARNING: JINA_API_KEY не задан. Поиск по базе знаний не будет работать.")
 
 COLLECTION_NAME = "xiaozhi_knowledge"
 HISTORY_COLLECTION = "chat_history"
@@ -107,6 +114,9 @@ async def startup_event():
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
 async def get_embedding(text: str) -> list[float]:
+    """Получает эмбеддинг через Jina API"""
+    if not JINA_API_KEY:
+        raise ValueError("JINA_API_KEY не задан")
     headers = {"Authorization": f"Bearer {JINA_API_KEY}", "Content-Type": "application/json"}
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -129,7 +139,6 @@ async def search_knowledge(query: str) -> str:
         )
         if not search_result:
             return ""
-        # Безопасное извлечение текста
         contexts = []
         for hit in search_result:
             if hit.payload and hit.payload.get("text"):
@@ -141,7 +150,6 @@ async def search_knowledge(query: str) -> str:
 
 def save_to_history(user_id: str, role: str, content: str):
     try:
-        # Используем UUID для уникального ID
         point_id = uuid.uuid4().int % 1000000000
         timestamp = datetime.utcnow().isoformat()
         qdrant.upsert(
@@ -186,6 +194,11 @@ async def process_message_core(user_id: str, text: str) -> str:
     if len(text) > 1000:
         return "Сообщение слишком длинное. Максимум 1000 символов."
 
+    if not POLZA_API_KEY:
+        return "Ошибка: не настроен ключ API Polza. Обратитесь к администратору."
+    if not JINA_API_KEY:
+        return "Ошибка: не настроен ключ API Jina. Обратитесь к администратору."
+
     print(f"🧠 Запрос от {user_id}: '{text[:50]}...'")
     save_to_history(user_id, "user", text)
     history = get_history(user_id, limit=6)
@@ -205,14 +218,19 @@ async def process_message_core(user_id: str, text: str) -> str:
     prompt += f"Вопрос пользователя: {text}\n\nДай полезный, точный и развернутый ответ."
 
     async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://api.polza.ai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "deepseek/deepseek-v4-flash", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3},
-            timeout=30.0
-        )
-        response.raise_for_status()
-        answer = response.json()["choices"][0]["message"]["content"]
+        try:
+            response = await client.post(
+                "https://api.polza.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"},
+                json={"model": "deepseek/deepseek-v4-flash", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3},
+                timeout=30.0
+            )
+            response.raise_for_status()
+            answer = response.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            print(f"❌ Ошибка при вызове Polza API: {e}")
+            print(traceback.format_exc())
+            return "Извините, произошла ошибка при обработке запроса к ИИ. Попробуйте позже."
 
     save_to_history(user_id, "bot", answer)
     return answer
@@ -267,7 +285,6 @@ async def telegram_webhook(update: dict):
 # 💬 ВКОНТАКТЕ ИНТЕГРАЦИЯ
 # ==========================================
 async def send_vk_message(user_id: int, text: str):
-    """Отправляет сообщение пользователю в ВКонтакте"""
     if not VK_GROUP_TOKEN:
         print("❌ VK_GROUP_TOKEN не настроен!")
         return
@@ -292,36 +309,28 @@ async def send_vk_message(user_id: int, text: str):
 
 @app.post("/webhook/vk")
 async def vk_webhook(request: Request):
-    """Принимает Callback API события от ВКонтакте"""
     try:
         event = await request.json()
     except Exception:
         return PlainTextResponse("ok")
 
-    # 1. Подтверждение адреса сервера
     if event.get("type") == "confirmation":
         return PlainTextResponse(VK_CONFIRMATION_STRING)
 
-    # 2. Обработка нового сообщения
     if event.get("type") == "message_new":
         obj = event.get("object", {})
         message = obj.get("message", {})
-        
         user_id = message.get("from_id")
         text = message.get("text", "").strip()
-        
         if not text or user_id <= 0:
             return PlainTextResponse("ok")
-        
         vk_user_id = f"vk_{user_id}"
-        
         try:
             response_text = await process_message_core(vk_user_id, text)
             await send_vk_message(user_id, response_text)
         except Exception as e:
             print(f"❌ Ошибка обработки сообщения VK: {e}")
             await send_vk_message(user_id, "Извините, произошла ошибка при обработке вашего сообщения.")
-            
     return PlainTextResponse("ok")
 
 
@@ -432,15 +441,11 @@ async def handle_query(request: Request):
         return JSONResponse({"response": answer})
     except Exception as e:
         print(f"❌ Ошибка в /query: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        print(traceback.format_exc())
+        return JSONResponse({"error": str(e) or "Внутренняя ошибка сервера"}, status_code=500)
 
 @app.get("/get_history")
 async def get_history_endpoint(user_id: str):
-    """
-    Возвращает историю чата пользователя.
-    Ожидает параметр user_id.
-    Возвращает: {"history": [ ... ]}
-    """
     try:
         messages = get_history(user_id, limit=50)
         return JSONResponse({"history": messages})
@@ -481,7 +486,6 @@ async def delete_user(user_id: str, request: Request):
 
 @app.get("/get_all_knowledge")
 async def get_all_knowledge(request: Request):
-    """Возвращает список всех знаний из базы для админ-панели"""
     verify_admin(request)
     try:
         records, next_page = qdrant.scroll(
@@ -500,7 +504,6 @@ async def get_all_knowledge(request: Request):
                     "length": len(r.payload.get("text", ""))
                 })
 
-        # Группируем по файлам для статистики
         files_stats = {}
         for item in knowledge_list:
             fname = item["source_file"]
@@ -517,63 +520,44 @@ async def get_all_knowledge(request: Request):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
-
 @app.delete("/delete_knowledge")
 async def delete_knowledge(request: Request):
-    """Удаляет конкретный фрагмент знания по его ID"""
     verify_admin(request)
     try:
         body = await request.json()
         knowledge_id = body.get("id")
-        
         if not knowledge_id:
             return JSONResponse({"error": "ID не указан"}, status_code=400)
-        
         qdrant.delete(
             collection_name=COLLECTION_NAME,
-            points_selector=models.PointIdsList(
-                points=[knowledge_id]
-            )
+            points_selector=models.PointIdsList(points=[knowledge_id])
         )
         return JSONResponse({"status": "success", "message": f"Знание {knowledge_id} удалено"})
     except Exception as e:
         print(f"❌ Ошибка удаления знания: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
-
 @app.delete("/delete_file_knowledge")
 async def delete_file_knowledge(file_name: str, request: Request):
-    """Удаляет ВСЕ фрагменты, загруженные из конкретного файла"""
     verify_admin(request)
     try:
-        # Сначала находим все ID, связанные с этим файлом
         records, _ = qdrant.scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="source_file",
-                        match=models.MatchValue(value=file_name)
-                    )
-                ]
+                must=[models.FieldCondition(key="source_file", match=models.MatchValue(value=file_name))]
             ),
             limit=1000,
             with_payload=False
         )
-        
         if not records:
             return JSONResponse({"error": "Файл не найден"}, status_code=404)
-        
         ids_to_delete = [r.id for r in records]
-        
         qdrant.delete(
             collection_name=COLLECTION_NAME,
-            points_selector=models.PointIdsList(
-                points=ids_to_delete
-            )
+            points_selector=models.PointIdsList(points=ids_to_delete)
         )
         return JSONResponse({
-            "status": "success", 
+            "status": "success",
             "message": f"Удалено {len(ids_to_delete)} фрагментов из файла {file_name}"
         })
     except Exception as e:
