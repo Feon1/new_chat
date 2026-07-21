@@ -19,5 +19,6 @@ httpx>=0.24.0
 numpy
 # light-embed
 fastembed
+certifi>=2024.7.4
 
 
