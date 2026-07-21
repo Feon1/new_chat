@@ -58,6 +58,8 @@ qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 @app.on_event("startup")
 async def startup_event():
     """Создаем коллекции, индексы и устанавливаем вебхук Telegram при запуске"""
+    
+    
     # 1. Коллекция для базы знаний
     try:
         qdrant.get_collection(COLLECTION_NAME)
@@ -101,8 +103,12 @@ async def startup_event():
             except Exception as e:
                 print(f"❌ Ошибка установки Telegram Webhook: {e}")
     else:
-        print("⚠️ Переменные TELEGRAM_BOT_TOKEN или WEBHOOK_URL не найдены.")
+        print("⚠️ Переменные TELEGRAM_BOT_TOKEN или WEBHOOK_URL не найдены.") 
+        
 
+
+        # 5. Установка вебхука для MAX
+    await set_max_webhook()
 
 # ==========================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -277,6 +283,80 @@ async def telegram_webhook(update: dict):
             traceback.print_exc()
             await send_telegram_message(chat_id, "Извините, произошла ошибка при обработке вашего сообщения.")
     return {"ok": True}
+    
+@app.post("/webhook/max")
+async def max_webhook(request: Request):
+    """Эндпоинт для приёма вебхуков от MAX"""
+    try:
+        body = await request.json()
+        print(f"📩 MAX webhook: {body}")
+    except Exception:
+        return PlainTextResponse("ok")
+
+    event_type = body.get("event_type")
+    if event_type == "message":
+        chat_id = body["chat"]["id"]
+        # Формируем уникальный ID пользователя для хранения истории
+        user_id = f"max_{body['from']['id']}"
+        text = body.get("text", "").strip()
+        if not text:
+            return PlainTextResponse("ok")
+
+        try:
+            # Используем ваше универсальное ядро для обработки
+            answer = await process_message_core(user_id, text)
+            await send_max_message(chat_id, answer)
+        except Exception as e:
+            print(f"❌ Ошибка обработки сообщения MAX: {e}")
+            traceback.print_exc()
+            await send_max_message(chat_id, "Извините, произошла ошибка.")
+
+    return PlainTextResponse("ok")
+
+# ==========================================
+# 🔷 MAX ИНТЕГРАЦИЯ
+# ==========================================
+async def set_max_webhook():
+    """Устанавливает вебхук для MAX бота"""
+    if not MAX_BOT_TOKEN or not MAX_WEBHOOK_URL:
+        print("⚠️ MAX_BOT_TOKEN или MAX_WEBHOOK_URL не заданы, пропускаем")
+        return
+
+    url = "https://platform-api2.max.ru/webhook"
+    headers = {
+        "Authorization": MAX_BOT_TOKEN,
+        "Content-Type": "application/json"
+    }
+    payload = {"url": MAX_WEBHOOK_URL}
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            print(f"✅ MAX Webhook установлен: {response.json()}")
+        except Exception as e:
+            print(f"❌ Ошибка установки MAX Webhook: {e}")
+
+async def send_max_message(chat_id: str, text: str):
+    """Отправляет сообщение в чат MAX"""
+    if not MAX_BOT_TOKEN:
+        print("❌ MAX_BOT_TOKEN не задан")
+        return
+
+    url = "https://platform-api2.max.ru/messages"
+    headers = {
+        "Authorization": MAX_BOT_TOKEN,
+        "Content-Type": "application/json"
+    }
+    payload = {"chat_id": chat_id, "text": text}
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            print(f"✅ Сообщение отправлено в MAX (chat {chat_id})")
+        except Exception as e:
+            print(f"❌ Ошибка отправки в MAX: {e}")
 
 
 # ==========================================
@@ -304,6 +384,7 @@ async def send_vk_message(user_id: int, text: str):
                 print(f"❌ Ошибка VK API: {result['error']}")
         except Exception as e:
             print(f"❌ Ошибка отправки в VK: {e}")
+            
 
 @app.post("/webhook/vk")
 async def vk_webhook(request: Request):
