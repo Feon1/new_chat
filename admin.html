@@ -2,542 +2,588 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Феон | Админ-панель</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <title>Админ-панель XiaoZhi</title>
     <style>
+        /* ----- Базовые переменные ----- */
         :root {
-            --bg-dark: #1a1a2e;
-            --bg-card: #16213e;
-            --bg-input: #0f3460;
-            --accent: #667eea;
-            --accent-hover: #764ba2;
-            --text-main: #eaeaea;
-            --text-muted: #8892b0;
-            --danger: #e74c3c;
+            --bg: #0e0e12;
+            --surface: #1a1a22;
+            --surface2: #252530;
+            --text: #e8e8f0;
+            --text-dim: #8888a0;
+            --accent: #6c5ce7;
+            --accent-hover: #7d6ff0;
+            --danger: #e74c6f;
+            --danger-hover: #f05a7a;
             --success: #2ecc71;
-            --warning: #f39c12;
-            --border: rgba(255, 255, 255, 0.1);
+            --border: #2d2d3a;
+            --radius: 12px;
+            --shadow: 0 4px 24px rgba(0,0,0,0.4);
+            --transition: 0.2s ease;
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Nunito', 'Segoe UI', sans-serif; }
-        body { background-color: var(--bg-dark); color: var(--text-main); min-height: 100vh; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
-        /* === ЭКРАН ВХОДА === */
-        .login-screen {
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(26, 26, 46, 0.95); backdrop-filter: blur(10px);
-            display: flex; align-items: center; justify-content: center; z-index: 1000;
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 16px;
+        }
+
+        /* ----- Авторизация ----- */
+        .login-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(4px);
         }
         .login-box {
-            background: var(--bg-card); padding: 40px; border-radius: 16px;
-            width: 90%; max-width: 400px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-            border: 1px solid var(--border); text-align: center;
+            background: var(--surface);
+            padding: 32px 28px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            width: 100%;
+            max-width: 400px;
+            border: 1px solid var(--border);
         }
-        .login-box h2 { color: var(--accent); margin-bottom: 25px; font-size: 24px; }
+        .login-box h2 {
+            font-weight: 600;
+            font-size: 22px;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+        .login-box p {
+            color: var(--text-dim);
+            text-align: center;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
         .login-input {
-            width: 100%; padding: 14px; background: var(--bg-input);
-            border: 1px solid var(--border); border-radius: 8px;
-            color: var(--text-main); font-size: 15px; margin-bottom: 15px;
+            width: 100%;
+            padding: 14px 16px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 16px;
+            outline: none;
+            transition: border var(--transition);
         }
-        .login-input:focus { outline: none; border-color: var(--accent); }
-        .remember-me {
-            display: flex; align-items: center; gap: 10px; margin-bottom: 20px;
-            color: var(--text-muted); cursor: pointer; font-size: 14px; justify-content: center;
-        }
-        .remember-me input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+        .login-input:focus { border-color: var(--accent); }
         .login-btn {
-            width: 100%; padding: 14px; background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-            color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer;
+            width: 100%;
+            padding: 14px;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background var(--transition);
+            margin-top: 12px;
         }
-        .login-btn:hover { transform: translateY(-2px); }
-        .login-error { color: var(--danger); margin-top: 15px; font-size: 14px; display: none; word-break: break-word; }
+        .login-btn:hover { background: var(--accent-hover); }
+        .login-error {
+            color: var(--danger);
+            font-size: 14px;
+            margin-top: 12px;
+            text-align: center;
+            display: none;
+        }
 
-        /* === ОСНОВНОЙ ИНТЕРФЕЙС === */
-        .admin-container { display: none; max-width: 1400px; margin: 0 auto; padding: 20px; }
+        /* ----- Основная панель ----- */
+        .app-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: none;
+        }
+
+        /* Шапка */
         .header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 16px 20px;
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            margin-bottom: 16px;
         }
-        .header h1 { font-size: 22px; }
-        .stats { display: flex; gap: 15px; flex-wrap: wrap; }
-        .stat-box {
-            background: var(--bg-card); padding: 12px 20px; border-radius: 12px;
-            border: 1px solid var(--border); text-align: center;
+        .header h1 {
+            font-size: 22px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
-        .stat-box .number { font-size: 22px; font-weight: 700; color: var(--accent); }
-        .stat-box .label { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+        .header h1 span { color: var(--accent); }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
         .logout-btn {
-            background: rgba(231, 76, 60, 0.15); color: var(--danger);
-            border: 1px solid rgba(231, 76, 60, 0.3); padding: 10px 20px;
-            border-radius: 8px; cursor: pointer; font-weight: 600;
+            padding: 8px 16px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 14px;
+            transition: all var(--transition);
         }
-        .logout-btn:hover { background: var(--danger); color: white; }
+        .logout-btn:hover {
+            background: var(--danger);
+            border-color: var(--danger);
+            color: #fff;
+        }
 
-        /* === ВКЛАДКИ === */
-        .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+        .stats {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .stat-box {
+            background: var(--surface2);
+            padding: 8px 16px;
+            border-radius: 8px;
+            text-align: center;
+            min-width: 80px;
+        }
+        .stat-box .number {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        .stat-box .label {
+            font-size: 11px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Вкладки */
+        .tabs {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 16px;
+            overflow-x: auto;
+            padding: 0 2px 4px;
+        }
         .tab {
-            padding: 12px 24px; background: transparent; border: none;
-            color: var(--text-muted); cursor: pointer; font-size: 15px; font-weight: 600;
-            border-bottom: 3px solid transparent; transition: all 0.2s;
+            padding: 10px 20px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 14px;
+            white-space: nowrap;
+            transition: all var(--transition);
+            flex: 0 0 auto;
         }
-        .tab:hover { color: var(--text-main); }
-        .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
+        .tab:hover { border-color: var(--accent); color: var(--text); }
+        .tab.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
 
-        /* === ОБЩИЕ СТИЛИ ПАНЕЛЕЙ === */
-        .dashboard, .knowledge-dashboard { display: grid; grid-template-columns: 350px 1fr; gap: 20px; height: calc(100vh - 240px); }
+        /* Панели */
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 16px;
+            height: calc(100vh - 220px);
+            min-height: 400px;
+        }
         .panel {
-            background: var(--bg-card); border-radius: 16px; border: 1px solid var(--border);
-            display: flex; flex-direction: column; overflow: hidden;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
         .panel-header {
-            padding: 15px 20px; border-bottom: 1px solid var(--border);
-            font-weight: 600; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
         }
-        .user-list, .knowledge-list { flex: 1; overflow-y: auto; }
-        
-        /* === ЭЛЕМЕНТЫ СПИСКОВ === */
-        .user-item, .file-item {
-            padding: 15px 20px; border-bottom: 1px solid var(--border); cursor: pointer;
-            display: flex; justify-content: space-between; align-items: center;
+        .panel-header h3 {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-dim);
         }
-        .user-item:hover, .file-item:hover { background: rgba(102, 126, 234, 0.1); }
-        .user-item.active { background: rgba(102, 126, 234, 0.2); border-left: 3px solid var(--accent); }
-        .file-item.active { background: rgba(46, 204, 113, 0.2); border-left: 3px solid var(--success); }
-        
-        .user-id, .file-name { font-weight: 600; font-size: 14px; }
-        .file-name { color: var(--success); }
-        .user-meta, .file-meta { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
-        .delete-btn { background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 18px; opacity: 0.7; }
-        .delete-btn:hover { opacity: 1; }
+        .panel-header button {
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: background var(--transition);
+        }
+        .panel-header button:hover { background: var(--surface2); }
 
-        /* === ЗОНА ЗАГРУЗКИ ФАЙЛОВ === */
+        .panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 12px;
+        }
+
+        /* Список пользователей */
+        .user-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background var(--transition);
+            border-bottom: 1px solid var(--border);
+        }
+        .user-item:hover { background: var(--surface2); }
+        .user-item.active { background: var(--surface2); border-left: 3px solid var(--accent); }
+        .user-id {
+            font-weight: 500;
+            font-size: 14px;
+            word-break: break-word;
+        }
+        .user-meta {
+            font-size: 12px;
+            color: var(--text-dim);
+            text-align: right;
+            white-space: nowrap;
+            margin-left: 8px;
+        }
+        .user-meta .count { color: var(--accent); font-weight: 600; }
+
+        /* Чат */
+        .chat-view {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .message {
+            max-width: 85%;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            word-wrap: break-word;
+            background: var(--surface2);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+        .message.user {
+            background: var(--accent);
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+            color: #fff;
+        }
+        .message-time {
+            font-size: 10px;
+            color: var(--text-dim);
+            margin-top: 4px;
+            text-align: right;
+        }
+        .message.user .message-time { color: rgba(255,255,255,0.7); }
+        .empty-state {
+            color: var(--text-dim);
+            text-align: center;
+            padding: 40px 20px;
+            font-size: 14px;
+        }
+        .loading {
+            color: var(--text-dim);
+            text-align: center;
+            padding: 20px;
+            font-size: 14px;
+        }
+
+        /* База знаний */
+        .knowledge-dashboard {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 16px;
+            height: calc(100vh - 220px);
+            min-height: 400px;
+        }
+        .knowledge-list .knowledge-item {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .knowledge-item .source {
+            font-size: 11px;
+            color: var(--text-dim);
+            display: block;
+            margin-top: 4px;
+        }
+        .knowledge-item .delete-kb {
+            float: right;
+            background: none;
+            border: none;
+            color: var(--danger);
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 6px;
+        }
+        .knowledge-item .delete-kb:hover { color: var(--danger-hover); }
+
         .upload-zone {
-            padding: 15px 20px; border-bottom: 1px solid var(--border);
-            display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-            background: rgba(102, 126, 234, 0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 16px;
         }
         .file-input-wrapper {
-            position: relative; overflow: hidden; display: inline-block; flex: 1;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
         }
-        .file-input-wrapper input[type=file] {
-            font-size: 14px; color: var(--text-muted); width: 100%;
+        .file-input-wrapper input[type="file"] {
+            flex: 1;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px;
+            color: var(--text);
+            font-size: 13px;
+            min-width: 150px;
         }
         .upload-btn {
-            padding: 10px 20px; background: var(--success); color: white;
-            border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background var(--transition);
         }
-        .upload-btn:hover { background: #27ae60; }
-        .upload-btn:disabled { background: var(--text-muted); cursor: not-allowed; }
-        .upload-status { font-size: 13px; width: 100%; margin-top: 5px; }
+        .upload-btn:hover { background: var(--accent-hover); }
+        .upload-btn:disabled { opacity: 0.5; pointer-events: none; }
 
-        /* === ПРОСМОТР === */
-        .chat-view, .knowledge-view { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
-        .message { max-width: 80%; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.5; }
-        .message.user { align-self: flex-end; background: var(--accent); color: white; border-bottom-right-radius: 4px; }
-        .message.assistant { align-self: flex-start; background: var(--bg-input); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-        .message-time { font-size: 11px; opacity: 0.7; margin-top: 6px; text-align: right; }
-        
-        .knowledge-text {
-            background: var(--bg-input); padding: 20px; border-radius: 12px;
-            border: 1px solid var(--border); font-size: 14px; line-height: 1.6;
-            white-space: pre-wrap; word-break: break-word;
+        /* Всплывающие уведомления */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 12px 24px;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            color: var(--text);
+            font-size: 14px;
+            z-index: 999;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            max-width: 90%;
         }
-        .knowledge-header-info { display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
-        .badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-        .badge-file { background: rgba(46, 204, 113, 0.2); color: var(--success); }
-        .badge-manual { background: rgba(243, 156, 18, 0.2); color: var(--warning); }
+        .toast.show { opacity: 1; }
+        .toast.error { border-color: var(--danger); }
+        .toast.success { border-color: var(--success); }
 
-        .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-style: italic; }
-        .loading { text-align: center; padding: 20px; color: var(--text-muted); }
-
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: var(--bg-dark); }
-        ::-webkit-scrollbar-thumb { background: var(--bg-input); border-radius: 4px; }
-
+        /* ----- Мобильная адаптация ----- */
         @media (max-width: 768px) {
-            .dashboard, .knowledge-dashboard { grid-template-columns: 1fr; height: auto; }
-            .panel { height: 50vh; }
+            body { padding: 10px; }
+            .dashboard, .knowledge-dashboard {
+                grid-template-columns: 1fr;
+                height: auto;
+                gap: 10px;
+            }
+            .panel {
+                height: auto;
+                max-height: 60vh;
+                min-height: 300px;
+            }
+            .user-list, .chat-view {
+                max-height: 40vh;
+                overflow-y: auto;
+            }
+            .header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+                padding: 12px;
+            }
+            .header h1 { font-size: 18px; text-align: center; }
+            .stats { justify-content: center; }
+            .stat-box { flex: 1 1 40%; min-width: 70px; }
+            .stat-box .number { font-size: 16px; }
+            .stat-box .label { font-size: 10px; }
+            .tabs { flex-wrap: nowrap; overflow-x: auto; gap: 4px; padding: 0 4px 4px; }
+            .tab { padding: 8px 14px; font-size: 13px; flex: 1; text-align: center; }
+            .message { font-size: 14px; padding: 8px 12px; max-width: 90%; }
+            .message-time { font-size: 10px; }
+            .user-item { padding: 8px 10px; }
+            .user-id { font-size: 13px; }
+            .user-meta { font-size: 11px; }
+            .logout-btn { padding: 6px 12px; font-size: 13px; }
+            .login-box { padding: 24px 18px; width: 95%; }
+            .login-box h2 { font-size: 20px; }
+            .login-input { padding: 12px; font-size: 15px; }
+            .upload-zone { flex-direction: column; gap: 8px; padding: 12px; }
+            .file-input-wrapper { flex-direction: column; }
+            .file-input-wrapper input[type="file"] { width: 100%; }
+            .upload-btn { width: 100%; justify-content: center; }
+            .panel-header button { font-size: 16px; }
+            .toast { bottom: 16px; font-size: 13px; padding: 10px 18px; }
+        }
+
+        @media (max-width: 480px) {
+            .panel { max-height: 70vh; min-height: 250px; }
+            .user-list, .chat-view { max-height: 35vh; }
+            .message { font-size: 13px; padding: 6px 10px; max-width: 95%; }
+            .stat-box { flex: 1 1 30%; padding: 6px 8px; }
+            .stat-box .number { font-size: 14px; }
+            .header h1 { font-size: 16px; }
+            .tab { font-size: 12px; padding: 6px 10px; }
         }
     </style>
 </head>
 <body>
 
-    <div id="loginScreen" class="login-screen">
-        <div class="login-box">
-            <h2>🔐 Вход в админ-панель</h2>
-            <input type="password" id="tokenInput" class="login-input" placeholder="Введите ADMIN_TOKEN" onkeypress="if(event.key==='Enter') login()">
-            <label class="remember-me">
-                <input type="checkbox" id="rememberMe" checked> Запомнить меня
-            </label>
-            <button onclick="login()" class="login-btn">Войти</button>
-            <div id="loginError" class="login-error"></div>
+<!-- Модальное окно входа -->
+<div class="login-overlay" id="loginOverlay">
+    <div class="login-box">
+        <h2>🔐 Админ-панель</h2>
+        <p>Введите токен администратора для доступа</p>
+        <input type="password" class="login-input" id="loginInput" placeholder="Токен администратора" autofocus>
+        <button class="login-btn" id="loginBtn">Войти</button>
+        <div class="login-error" id="loginError">Неверный токен</div>
+    </div>
+</div>
+
+<!-- Основное приложение -->
+<div class="app-container" id="appContainer">
+
+    <!-- Шапка -->
+    <header class="header">
+        <h1>Xiao<span>Zhi</span> <span style="font-size:14px; color:var(--text-dim); font-weight:400;">Админ</span></h1>
+        <div class="header-actions">
+            <div class="stats" id="stats">
+                <div class="stat-box"><span class="number" id="usersCount">0</span><span class="label">Пользователи</span></div>
+                <div class="stat-box"><span class="number" id="knowledgeCount">0</span><span class="label">Знаний</span></div>
+                <div class="stat-box"><span class="number" id="filesCount">0</span><span class="label">Файлов</span></div>
+            </div>
+            <button class="logout-btn" id="logoutBtn">Выйти</button>
+        </div>
+    </header>
+
+    <!-- Вкладки -->
+    <div class="tabs">
+        <button class="tab active" data-tab="chat">💬 Чаты</button>
+        <button class="tab" data-tab="knowledge">📚 База знаний</button>
+    </div>
+
+    <!-- Контент -->
+    <div id="tabContent">
+        <!-- Вкладка Чаты -->
+        <div class="dashboard" id="chatTab">
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>👥 Пользователи</h3>
+                    <button id="refreshUsersBtn" title="Обновить">🔄</button>
+                </div>
+                <div class="panel-body user-list" id="userList">
+                    <div class="loading">Загрузка...</div>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <h3 id="chatHeaderTitle">💬 Выберите пользователя</h3>
+                    <button id="deleteChatBtn" style="display:none; color:var(--danger);" title="Удалить историю">🗑️</button>
+                </div>
+                <div class="panel-body chat-view" id="chatView">
+                    <div class="empty-state">Выберите пользователя из списка слева</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладка База знаний -->
+        <div class="knowledge-dashboard" id="knowledgeTab" style="display:none;">
+            <div class="panel knowledge-list">
+                <div class="panel-header">
+                    <h3>📄 Все знания</h3>
+                    <button id="refreshKnowledgeBtn" title="Обновить">🔄</button>
+                </div>
+                <div class="panel-body" id="knowledgeList">
+                    <div class="loading">Загрузка...</div>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>📤 Загрузить файл</h3>
+                </div>
+                <div class="panel-body upload-zone">
+                    <p style="color:var(--text-dim); font-size:13px;">Поддерживаются .pdf, .docx</p>
+                    <div class="file-input-wrapper">
+                        <input type="file" id="fileInput" accept=".pdf,.docx">
+                        <button class="upload-btn" id="uploadBtn">⬆ Загрузить</button>
+                    </div>
+                    <div id="uploadStatus" style="font-size:13px; color:var(--text-dim);"></div>
+                    <hr style="border-color:var(--border); margin:12px 0;">
+                    <button class="upload-btn" id="addKnowledgeBtn" style="background: var(--surface2); color: var(--text);">➕ Добавить вручную</button>
+                    <div id="manualInput" style="display:none; margin-top:8px;">
+                        <textarea id="manualText" rows="3" style="width:100%; padding:10px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:14px; resize:vertical;" placeholder="Введите текст знания..."></textarea>
+                        <button class="upload-btn" id="saveManualBtn" style="margin-top:8px; width:100%;">Сохранить знание</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
-    <div id="adminPanel" class="admin-container">
-        <div class="header">
-            <h1>🔐 Админ-панель Феон</h1>
-            <div class="stats">
-                <div class="stat-box"><div class="number" id="totalUsers">0</div><div class="label">Пользователей</div></div>
-                <div class="stat-box"><div class="number" id="totalMessages">0</div><div class="label">Сообщений</div></div>
-                <div class="stat-box"><div class="number" id="totalKnowledge">0</div><div class="label">Фрагментов знаний</div></div>
-                <div class="stat-box"><div class="number" id="totalFiles">0</div><div class="label">Файлов в БЗ</div></div>
-            </div>
-            <button onclick="logout()" class="logout-btn">🚪 Выйти</button>
-        </div>
+</div>
 
-        <div class="tabs">
-            <button class="tab active" onclick="switchTab('chats')">💬 История чатов</button>
-            <button class="tab" onclick="switchTab('knowledge')">📚 База знаний</button>
-        </div>
+<!-- Уведомление -->
+<div class="toast" id="toast"></div>
 
-        <!-- ВКЛАДКА: ИСТОРИЯ ЧАТОВ -->
-        <div id="tab-chats" class="tab-content active">
-            <div class="dashboard">
-                <div class="panel">
-                    <div class="panel-header">
-                        <span>Пользователи</span>
-                        <button onclick="loadUsers()" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:18px;">🔄</button>
-                    </div>
-                    <div id="userList" class="user-list"><div class="loading">Загрузка...</div></div>
-                </div>
-                <div class="panel">
-                    <div class="panel-header">
-                        <span id="chatHeaderTitle">Выберите пользователя</span>
-                        <button id="deleteChatBtn" onclick="deleteCurrentUser()" class="logout-btn" style="padding: 5px 10px; font-size: 12px; display: none;">🗑 Удалить чат</button>
-                    </div>
-                    <div id="chatView" class="chat-view">
-                        <div class="empty-state">Выберите пользователя слева</div>
-                    </div>
-                </div>
-            </div>
-        </div>
+<script>
+    // ===== Конфигурация =====
+    const API_BASE = window.location.origin; // например, https://docker-new-chat.onrender.com
+    let adminToken = localStorage.getItem('adminToken') || '';
+    let currentUserId = null;
 
-        <!-- ВКЛАДКА: БАЗА ЗНАНИЙ -->
-        <div id="tab-knowledge" class="tab-content">
-            <div class="knowledge-dashboard">
-                <div class="panel">
-                    <div class="panel-header">
-                        <span>📁 Файлы</span>
-                        <button onclick="loadKnowledge()" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:18px;">🔄</button>
-                    </div>
-                    
-                    <!-- НОВАЯ ЗОНА ЗАГРУЗКИ -->
-                    <div class="upload-zone">
-                        <div class="file-input-wrapper">
-                            <input type="file" id="fileInput" accept=".pdf,.docx">
-                        </div>
-                        <button onclick="uploadFile()" id="uploadBtn" class="upload-btn">📤 Загрузить</button>
-                        <div id="uploadStatus" class="upload-status"></div>
-                    </div>
+    // ===== DOM-элементы =====
+    const loginOverlay = document.getElementById('loginOverlay');
+    const loginInput = document.getElementById('loginInput');
+    const loginBtn = document.getElementById('loginBtn');
+    const loginError = document.getElementById('loginError');
+    const appContainer = document.getElementById('appContainer');
+    const logoutBtn = document.getElementById('logoutBtn');
 
-                    <div id="fileList" class="knowledge-list"><div class="loading">Загрузка...</div></div>
-                </div>
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="knowledge-header-info">
-                            <span id="knowledgeHeaderTitle">Выберите файл или фрагмент</span>
-                            <span id="knowledgeBadge"></span>
-                        </div>
-                        <button id="deleteFileBtn" onclick="deleteCurrentFile()" class="logout-btn" style="padding: 5px 10px; font-size: 12px; display: none;">🗑 Удалить файл</button>
-                    </div>
-                    <div id="knowledgeView" class="knowledge-view">
-                        <div class="empty-state">Выберите файл слева или загрузите новый</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // Автоматически определяет URL сервера
-        const API_BASE = window.location.hostname.includes('github.io') 
-            ? 'https://docker-new-chat.onrender.com' 
-            : '';
-            
-        let adminToken = '';
-        let currentUserId = null;
-        let currentFile = null;
-        let allKnowledge = [];
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const savedToken = localStorage.getItem('feon_admin_token') || sessionStorage.getItem('feon_admin_token');
-            if (savedToken) {
-                adminToken = savedToken;
-                showAdminPanel();
-            }
-        });
-
-        async function login() {
-            const token = document.getElementById('tokenInput').value.trim();
-            const remember = document.getElementById('rememberMe').checked;
-            const errorEl = document.getElementById('loginError');
-            
-            if (!token) { errorEl.textContent = '❌ Введите токен!'; errorEl.style.display = 'block'; return; }
-            errorEl.style.display = 'none';
-            
-            try {
-                const response = await fetch(`${API_BASE}/get_all_users`, { headers: { 'x-admin-token': token } });
-                if (response.status === 401) { errorEl.textContent = '❌ Неверный токен!'; errorEl.style.display = 'block'; return; }
-                if (!response.ok) throw new Error('Server error');
-                
-                adminToken = token;
-                if (remember) localStorage.setItem('feon_admin_token', token);
-                else sessionStorage.setItem('feon_admin_token', token);
-                showAdminPanel();
-            } catch (error) {
-                errorEl.textContent = `❌ Ошибка: ${error.message}`;
-                errorEl.style.display = 'block';
-            }
-        }
-
-        function showAdminPanel() {
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('adminPanel').style.display = 'block';
-            loadUsers();
-            loadKnowledge();
-        }
-
-        function logout() {
-            if (confirm('Выйти из админ-панели?')) {
-                localStorage.removeItem('feon_admin_token');
-                sessionStorage.removeItem('feon_admin_token');
-                location.reload();
-            }
-        }
-
-        function switchTab(tabName) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            event.target.classList.add('active');
-            document.getElementById(`tab-${tabName}`).classList.add('active');
-        }
-
-        // ==================== ИСТОРИЯ ЧАТОВ ====================
-        async function loadUsers() {
-            const userListEl = document.getElementById('userList');
-            userListEl.innerHTML = '<div class="loading">Загрузка...</div>';
-            
-            try {
-                const response = await fetch(`${API_BASE}/get_all_users`, { headers: { 'x-admin-token': adminToken } });
-                if (response.status === 401) { alert('Сессия истекла!'); logout(); return; }
-                const data = await response.json();
-                const users = data.users || [];
-                
-                document.getElementById('totalUsers').textContent = users.length;
-                let totalMsgs = users.reduce((sum, u) => sum + (u.message_count || 0), 0);
-                document.getElementById('totalMessages').textContent = totalMsgs;
-                
-                if (users.length === 0) { userListEl.innerHTML = '<div class="empty-state">Нет пользователей</div>'; return; }
-                
-                userListEl.innerHTML = users.map(user => `
-                    <div class="user-item ${currentUserId === user.user_id ? 'active' : ''}" onclick="selectUser('${user.user_id}')">
-                        <div style="flex:1">
-                            <div class="user-id">${escapeHtml(user.user_id)}</div>
-                            <div class="user-meta">${user.message_count || 0} сообщ. • ${user.last_activity ? new Date(user.last_activity).toLocaleString('ru-RU') : 'Неактивен'}</div>
-                        </div>
-                        <button class="delete-btn" onclick="event.stopPropagation(); deleteUser('${user.user_id}')">🗑</button>
-                    </div>
-                `).join('');
-            } catch (error) {
-                userListEl.innerHTML = `<div class="loading" style="color: var(--danger)">Ошибка: ${error.message}</div>`;
-            }
-        }
-
-        async function selectUser(userId) {
-            currentUserId = userId;
-            document.getElementById('chatHeaderTitle').textContent = `Чат: ${userId}`;
-            document.getElementById('deleteChatBtn').style.display = 'block';
-            const chatViewEl = document.getElementById('chatView');
-            chatViewEl.innerHTML = '<div class="loading">Загрузка...</div>';
-            
-            try {
-                const response = await fetch(`${API_BASE}/get_history?user_id=${encodeURIComponent(userId)}`, { headers: { 'x-admin-token': adminToken } });
-                if (response.status === 401) { logout(); return; }
-                const data = await response.json();
-                const messages = data.history || [];
-                
-                if (messages.length === 0) { chatViewEl.innerHTML = '<div class="empty-state">История пуста</div>'; return; }
-                
-                chatViewEl.innerHTML = messages.map(msg => `
-                    <div class="message ${msg.role === 'user' ? 'user' : 'assistant'}">
-                        <div>${escapeHtml(msg.content).replace(/\n/g, '<br>')}</div>
-                        <div class="message-time">${msg.timestamp ? new Date(msg.timestamp).toLocaleString('ru-RU') : ''}</div>
-                    </div>
-                `).join('');
-                chatViewEl.scrollTop = chatViewEl.scrollHeight;
-            } catch (error) {
-                chatViewEl.innerHTML = `<div class="loading" style="color: var(--danger)">Ошибка: ${error.message}</div>`;
-            }
-        }
-
-        async function deleteUser(userId) {
-            if (!confirm(`Удалить пользователя ${userId}?`)) return;
-            try {
-                await fetch(`${API_BASE}/delete_user?user_id=${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { 'x-admin-token': adminToken } });
-                if (currentUserId === userId) {
-                    currentUserId = null;
-                    document.getElementById('chatView').innerHTML = '<div class="empty-state">Выберите пользователя слева</div>';
-                }
-                loadUsers();
-            } catch (e) { alert('Ошибка'); }
-        }
-
-        function deleteCurrentUser() { if (currentUserId) deleteUser(currentUserId); }
-
-        // ==================== БАЗА ЗНАНИЙ ====================
-        async function loadKnowledge() {
-            const fileListEl = document.getElementById('fileList');
-            fileListEl.innerHTML = '<div class="loading">Загрузка...</div>';
-            
-            try {
-                const response = await fetch(`${API_BASE}/get_all_knowledge`, { headers: { 'x-admin-token': adminToken } });
-                if (response.status === 401) { logout(); return; }
-                const data = await response.json();
-                
-                allKnowledge = data.knowledge || [];
-                const files = data.files || [];
-                
-                document.getElementById('totalKnowledge').textContent = data.total || 0;
-                document.getElementById('totalFiles').textContent = files.length;
-                
-                if (files.length === 0) { fileListEl.innerHTML = '<div class="empty-state">База знаний пуста</div>'; return; }
-                
-                fileListEl.innerHTML = files.map(file => `
-                    <div class="file-item ${currentFile === file.name ? 'active' : ''}" onclick="selectFile('${escapeHtml(file.name)}')">
-                        <div style="flex:1">
-                            <div class="file-name">${file.name === 'Ручной ввод' ? '✍️ Ручной ввод' : '📄 ' + escapeHtml(file.name)}</div>
-                            <div class="file-meta">${file.chunks} фрагментов • ${file.total_length} символов</div>
-                        </div>
-                        <button class="delete-btn" onclick="event.stopPropagation(); deleteFile('${escapeHtml(file.name)}')">🗑</button>
-                    </div>
-                `).join('');
-            } catch (error) {
-                fileListEl.innerHTML = `<div class="loading" style="color: var(--danger)">Ошибка: ${error.message}</div>`;
-            }
-        }
-
-        // === НОВАЯ ФУНКЦИЯ ЗАГРУЗКИ ФАЙЛА ===
-        async function uploadFile() {
-            const fileInput = document.getElementById('fileInput');
-            const statusEl = document.getElementById('uploadStatus');
-            const uploadBtn = document.getElementById('uploadBtn');
-            const file = fileInput.files[0];
-
-            if (!file) {
-                statusEl.textContent = '❌ Выберите файл (PDF или DOCX)!';
-                statusEl.style.color = 'var(--danger)';
-                return;
-            }
-
-            if (!file.name.toLowerCase().endsWith('.pdf') && !file.name.toLowerCase().endsWith('.docx')) {
-                statusEl.textContent = '❌ Поддерживаются только форматы .pdf и .docx';
-                statusEl.style.color = 'var(--danger)';
-                return;
-            }
-
-            statusEl.textContent = `⏳ Загрузка и обработка "${file.name}"... Это может занять время.`;
-            statusEl.style.color = 'var(--warning)';
-            uploadBtn.disabled = true;
-
-            const formData = new FormData();
-            formData.append('file', file);
-
-            try {
-                const response = await fetch(`${API_BASE}/upload_document`, {
-                    method: 'POST',
-                    headers: {
-                        'x-admin-token': adminToken
-                        // Важно: не указывайте 'Content-Type': 'multipart/form-data' вручную, 
-                        // браузер сделает это автоматически с правильным boundary
-                    },
-                    body: formData
-                });
-
-                const result = await response.json();
-
-                if (response.ok) {
-                    statusEl.textContent = `✅ Успех: ${result.message}`;
-                    statusEl.style.color = 'var(--success)';
-                    fileInput.value = ''; // Очистить поле выбора файла
-                    loadKnowledge(); // Обновить список файлов
-                } else {
-                    statusEl.textContent = `❌ Ошибка сервера: ${result.error}`;
-                    statusEl.style.color = 'var(--danger)';
-                }
-            } catch (error) {
-                statusEl.textContent = `❌ Ошибка сети: ${error.message}`;
-                statusEl.style.color = 'var(--danger)';
-            } finally {
-                uploadBtn.disabled = false;
-            }
-        }
-
-        function selectFile(fileName) {
-            currentFile = fileName;
-            const isManual = fileName === 'Ручной ввод';
-            document.getElementById('knowledgeHeaderTitle').textContent = isManual ? '✍️ Ручной ввод' : `📄 ${fileName}`;
-            document.getElementById('knowledgeBadge').innerHTML = isManual 
-                ? '<span class="badge badge-manual">Ручной ввод</span>'
-                : `<span class="badge badge-file">Файл</span>`;
-            document.getElementById('deleteFileBtn').style.display = 'block';
-            
-            const knowledgeViewEl = document.getElementById('knowledgeView');
-            const fragments = allKnowledge.filter(k => k.source_file === fileName);
-            
-            if (fragments.length === 0) {
-                knowledgeViewEl.innerHTML = '<div class="empty-state">Нет фрагментов</div>';
-                return;
-            }
-            
-            knowledgeViewEl.innerHTML = fragments.map((frag, idx) => `
-                <div style="background: var(--bg-input); padding: 15px; border-radius: 12px; border: 1px solid var(--border);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <strong style="color: var(--accent);">Фрагмент #${idx + 1}</strong>
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <span style="font-size: 12px; color: var(--text-muted);">${frag.length} символов</span>
-                            <button class="delete-btn" onclick="deleteKnowledge(${frag.id})" title="Удалить фрагмент">🗑</button>
-                        </div>
-                    </div>
-                    <div class="knowledge-text">${escapeHtml(frag.text)}</div>
-                </div>
-            `).join('');
-        }
-
-        async function deleteKnowledge(id) {
-            if (!confirm('Удалить этот фрагмент?')) return;
-            try {
-                await fetch(`${API_BASE}/delete_knowledge`, {
-                    method: 'DELETE',
-                    headers: { 'x-admin-token': adminToken, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: id })
-                });
-                loadKnowledge();
-            } catch (e) { alert('Ошибка'); }
-        }
-
-        async function deleteFile(fileName) {
-            if (!confirm(`Удалить ВСЕ фрагменты из файла "${fileName}"?`)) return;
-            try {
-                await fetch(`${API_BASE}/delete_file_knowledge?file_name=${encodeURIComponent(fileName)}`, {
-                    method: 'DELETE',
-                    headers: { 'x-admin-token': adminToken }
-                });
-                currentFile = null;
-                document.getElementById('knowledgeView').innerHTML = '<div class="empty-state">Выберите файл слева</div>';
-                loadKnowledge();
-            } catch (e) { alert('Ошибка'); }
-        }
-
-        function deleteCurrentFile() { if (currentFile) deleteFile(currentFile); }
-
-        function escapeHtml(text) {
-            if (!text) return '';
-            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-            return text.replace(/[&<>"']/g, m => map[m]);
-        }
-    </script>
-</body>
-</html>
+    const userListEl = document.getElementById('userList');
+    const chatViewEl = document.getElementById('chatView');
+    const chatHeaderTitle
