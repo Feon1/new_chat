@@ -256,11 +256,11 @@
     <div id="loginScreen" class="login-screen">
         <div class="login-box">
             <h2>🔐 Вход в админ-панель</h2>
-            <input type="password" id="tokenInput" class="login-input" placeholder="Введите ADMIN_TOKEN" onkeypress="if(event.key==='Enter') login()">
+            <input type="password" id="tokenInput" class="login-input" placeholder="Введите ADMIN_TOKEN">
             <label class="remember-me">
                 <input type="checkbox" id="rememberMe" checked> Запомнить меня
             </label>
-            <button onclick="login()" class="login-btn">Войти</button>
+            <button id="loginBtn" class="login-btn">Войти</button>
             <div id="loginError" class="login-error"></div>
         </div>
     </div>
@@ -274,12 +274,12 @@
                 <div class="stat-box"><div class="number" id="totalKnowledge">0</div><div class="label">Фрагментов знаний</div></div>
                 <div class="stat-box"><div class="number" id="totalFiles">0</div><div class="label">Файлов в БЗ</div></div>
             </div>
-            <button onclick="logout()" class="logout-btn">🚪 Выйти</button>
+            <button id="logoutBtn" class="logout-btn">🚪 Выйти</button>
         </div>
 
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('chats')">💬 История чатов</button>
-            <button class="tab" onclick="switchTab('knowledge')">📚 База знаний</button>
+            <button class="tab active" data-tab="chats">💬 История чатов</button>
+            <button class="tab" data-tab="knowledge">📚 База знаний</button>
         </div>
 
         <!-- ВКЛАДКА: ИСТОРИЯ ЧАТОВ -->
@@ -288,14 +288,14 @@
                 <div class="panel">
                     <div class="panel-header">
                         <span>Пользователи</span>
-                        <button onclick="loadUsers()" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:18px;">🔄</button>
+                        <button id="refreshUsersBtn" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:18px;">🔄</button>
                     </div>
                     <div id="userList" class="user-list"><div class="loading">Загрузка...</div></div>
                 </div>
                 <div class="panel">
                     <div class="panel-header">
                         <span id="chatHeaderTitle">Выберите пользователя</span>
-                        <button id="deleteChatBtn" onclick="deleteCurrentUser()" class="logout-btn" style="padding: 4px 10px; font-size: 12px; display: none;">🗑 Удалить чат</button>
+                        <button id="deleteChatBtn" class="logout-btn" style="padding: 4px 10px; font-size: 12px; display: none;">🗑 Удалить чат</button>
                     </div>
                     <div id="chatView" class="chat-view">
                         <div class="empty-state">Выберите пользователя слева</div>
@@ -310,7 +310,7 @@
                 <div class="panel">
                     <div class="panel-header">
                         <span>📁 Файлы</span>
-                        <button onclick="loadKnowledge()" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:18px;">🔄</button>
+                        <button id="refreshKnowledgeBtn" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:18px;">🔄</button>
                     </div>
                     
                     <!-- ЗОНА ЗАГРУЗКИ -->
@@ -318,7 +318,7 @@
                         <div class="file-input-wrapper">
                             <input type="file" id="fileInput" accept=".pdf,.docx">
                         </div>
-                        <button onclick="uploadFile()" id="uploadBtn" class="upload-btn">📤 Загрузить</button>
+                        <button id="uploadBtn" class="upload-btn">📤 Загрузить</button>
                         <div id="uploadStatus" class="upload-status"></div>
                     </div>
 
@@ -330,7 +330,7 @@
                             <span id="knowledgeHeaderTitle">Выберите файл или фрагмент</span>
                             <span id="knowledgeBadge"></span>
                         </div>
-                        <button id="deleteFileBtn" onclick="deleteCurrentFile()" class="logout-btn" style="padding: 4px 10px; font-size: 12px; display: none;">🗑 Удалить файл</button>
+                        <button id="deleteFileBtn" class="logout-btn" style="padding: 4px 10px; font-size: 12px; display: none;">🗑 Удалить файл</button>
                     </div>
                     <div id="knowledgeView" class="knowledge-view">
                         <div class="empty-state">Выберите файл слева или загрузите новый</div>
@@ -351,42 +351,112 @@
         let currentFile = null;
         let allKnowledge = [];
 
+        // ===== DOM-элементы =====
+        const loginScreen = document.getElementById('loginScreen');
+        const tokenInput = document.getElementById('tokenInput');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginError = document.getElementById('loginError');
+        const rememberMe = document.getElementById('rememberMe');
+        const adminPanel = document.getElementById('adminPanel');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const refreshUsersBtn = document.getElementById('refreshUsersBtn');
+        const refreshKnowledgeBtn = document.getElementById('refreshKnowledgeBtn');
+        const userListEl = document.getElementById('userList');
+        const chatViewEl = document.getElementById('chatView');
+        const chatHeaderTitle = document.getElementById('chatHeaderTitle');
+        const deleteChatBtn = document.getElementById('deleteChatBtn');
+        const fileListEl = document.getElementById('fileList');
+        const knowledgeViewEl = document.getElementById('knowledgeView');
+        const knowledgeHeaderTitle = document.getElementById('knowledgeHeaderTitle');
+        const knowledgeBadge = document.getElementById('knowledgeBadge');
+        const deleteFileBtn = document.getElementById('deleteFileBtn');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const uploadStatus = document.getElementById('uploadStatus');
+
+        // ===== Инициализация =====
         document.addEventListener('DOMContentLoaded', () => {
             const savedToken = localStorage.getItem('feon_admin_token') || sessionStorage.getItem('feon_admin_token');
             if (savedToken) {
                 adminToken = savedToken;
                 showAdminPanel();
             }
+
+            // Привязка событий
+            loginBtn.addEventListener('click', login);
+            tokenInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+            logoutBtn.addEventListener('click', logout);
+            refreshUsersBtn.addEventListener('click', () => { loadUsers(); loadStats(); });
+            refreshKnowledgeBtn.addEventListener('click', loadKnowledge);
+            uploadBtn.addEventListener('click', uploadFile);
+            deleteChatBtn.addEventListener('click', deleteCurrentUser);
+            deleteFileBtn.addEventListener('click', deleteCurrentFile);
+
+            // Вкладки
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    const tabName = this.dataset.tab;
+                    document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+                    document.getElementById(`tab-${tabName}`).classList.add('active');
+                    if (tabName === 'chats') loadUsers();
+                    else loadKnowledge();
+                });
+            });
+
+            // Делегирование для кликов по пользователям и файлам (динамические элементы)
+            userListEl.addEventListener('click', (e) => {
+                const item = e.target.closest('.user-item');
+                if (item) {
+                    const userId = item.dataset.userId;
+                    if (userId) selectUser(userId);
+                }
+            });
+            fileListEl.addEventListener('click', (e) => {
+                const item = e.target.closest('.file-item');
+                if (item) {
+                    const fileName = item.dataset.fileName;
+                    if (fileName) selectFile(fileName);
+                }
+            });
         });
 
+        // ===== Функции =====
         async function login() {
-            const token = document.getElementById('tokenInput').value.trim();
-            const remember = document.getElementById('rememberMe').checked;
-            const errorEl = document.getElementById('loginError');
-            
-            if (!token) { errorEl.textContent = '❌ Введите токен!'; errorEl.style.display = 'block'; return; }
-            errorEl.style.display = 'none';
+            const token = tokenInput.value.trim();
+            if (!token) {
+                loginError.textContent = '❌ Введите токен!';
+                loginError.style.display = 'block';
+                return;
+            }
+            loginError.style.display = 'none';
             
             try {
                 const response = await fetch(`${API_BASE}/get_all_users`, { headers: { 'x-admin-token': token } });
-                if (response.status === 401) { errorEl.textContent = '❌ Неверный токен!'; errorEl.style.display = 'block'; return; }
+                if (response.status === 401) {
+                    loginError.textContent = '❌ Неверный токен!';
+                    loginError.style.display = 'block';
+                    return;
+                }
                 if (!response.ok) throw new Error('Server error');
                 
                 adminToken = token;
-                if (remember) localStorage.setItem('feon_admin_token', token);
+                if (rememberMe.checked) localStorage.setItem('feon_admin_token', token);
                 else sessionStorage.setItem('feon_admin_token', token);
                 showAdminPanel();
             } catch (error) {
-                errorEl.textContent = `❌ Ошибка: ${error.message}`;
-                errorEl.style.display = 'block';
+                loginError.textContent = `❌ Ошибка: ${error.message}`;
+                loginError.style.display = 'block';
             }
         }
 
         function showAdminPanel() {
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('adminPanel').style.display = 'block';
+            loginScreen.style.display = 'none';
+            adminPanel.style.display = 'block';
             loadUsers();
             loadKnowledge();
+            loadStats();
         }
 
         function logout() {
@@ -397,16 +467,29 @@
             }
         }
 
-        function switchTab(tabName) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            event.target.classList.add('active');
-            document.getElementById(`tab-${tabName}`).classList.add('active');
+        // ===== Статистика =====
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_BASE}/get_all_users`, { headers: { 'x-admin-token': adminToken } });
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('totalUsers').textContent = data.users?.length || 0;
+                    const totalMsgs = (data.users || []).reduce((sum, u) => sum + (u.message_count || 0), 0);
+                    document.getElementById('totalMessages').textContent = totalMsgs;
+                }
+            } catch (e) {}
+            try {
+                const resp = await fetch(`${API_BASE}/get_all_knowledge`, { headers: { 'x-admin-token': adminToken } });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    document.getElementById('totalKnowledge').textContent = data.total || 0;
+                    document.getElementById('totalFiles').textContent = (data.files || []).length;
+                }
+            } catch (e) {}
         }
 
         // ==================== ИСТОРИЯ ЧАТОВ ====================
         async function loadUsers() {
-            const userListEl = document.getElementById('userList');
             userListEl.innerHTML = '<div class="loading">Загрузка...</div>';
             
             try {
@@ -415,6 +498,254 @@
                 const data = await response.json();
                 const users = data.users || [];
                 
-                document.getElementById('totalUsers').textContent = users.length;
-                let totalMsgs = users.reduce((sum, u) => sum + (u.message_count || 0), 0);
-      
+                if (users.length === 0) {
+                    userListEl.innerHTML = '<div class="empty-state">Нет пользователей</div>';
+                    return;
+                }
+                
+                userListEl.innerHTML = users.map(user => `
+                    <div class="user-item ${currentUserId === user.user_id ? 'active' : ''}" data-user-id="${user.user_id}">
+                        <div style="flex:1">
+                            <div class="user-id">${escapeHtml(user.user_id)}</div>
+                            <div class="user-meta">${user.message_count || 0} сообщ. • ${user.last_activity ? new Date(user.last_activity).toLocaleString('ru-RU') : 'Неактивен'}</div>
+                        </div>
+                        <button class="delete-btn" data-user-id="${user.user_id}">🗑</button>
+                    </div>
+                `).join('');
+
+                // Обработчики для кнопок удаления пользователей
+                document.querySelectorAll('.user-item .delete-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const uid = btn.dataset.userId;
+                        if (uid) deleteUser(uid);
+                    });
+                });
+
+                // Если есть текущий пользователь, выделяем его и загружаем историю
+                if (currentUserId && users.some(u => u.user_id === currentUserId)) {
+                    selectUser(currentUserId);
+                }
+            } catch (error) {
+                userListEl.innerHTML = `<div class="loading" style="color: var(--danger)">Ошибка: ${error.message}</div>`;
+            }
+        }
+
+        async function selectUser(userId) {
+            currentUserId = userId;
+            chatHeaderTitle.textContent = `Чат: ${userId}`;
+            deleteChatBtn.style.display = 'block';
+            chatViewEl.innerHTML = '<div class="loading">Загрузка...</div>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/get_history?user_id=${encodeURIComponent(userId)}`, { headers: { 'x-admin-token': adminToken } });
+                if (response.status === 401) { logout(); return; }
+                const data = await response.json();
+                const messages = data.history || [];
+                
+                if (messages.length === 0) {
+                    chatViewEl.innerHTML = '<div class="empty-state">История пуста</div>';
+                    return;
+                }
+                
+                chatViewEl.innerHTML = messages.map(msg => `
+                    <div class="message ${msg.role === 'user' ? 'user' : 'assistant'}">
+                        <div>${escapeHtml(msg.content).replace(/\n/g, '<br>')}</div>
+                        <div class="message-time">${msg.timestamp ? new Date(msg.timestamp).toLocaleString('ru-RU') : ''}</div>
+                    </div>
+                `).join('');
+                
+                setTimeout(() => {
+                    chatViewEl.scrollTop = chatViewEl.scrollHeight;
+                }, 100);
+            } catch (error) {
+                chatViewEl.innerHTML = `<div class="loading" style="color: var(--danger)">Ошибка: ${error.message}</div>`;
+            }
+        }
+
+        async function deleteUser(userId) {
+            if (!confirm(`Удалить пользователя ${userId}?`)) return;
+            try {
+                await fetch(`${API_BASE}/delete_user?user_id=${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { 'x-admin-token': adminToken } });
+                if (currentUserId === userId) {
+                    currentUserId = null;
+                    chatViewEl.innerHTML = '<div class="empty-state">Выберите пользователя слева</div>';
+                    deleteChatBtn.style.display = 'none';
+                }
+                loadUsers();
+                loadStats();
+            } catch (e) { alert('Ошибка'); }
+        }
+
+        function deleteCurrentUser() {
+            if (currentUserId) deleteUser(currentUserId);
+        }
+
+        // ==================== БАЗА ЗНАНИЙ ====================
+        async function loadKnowledge() {
+            fileListEl.innerHTML = '<div class="loading">Загрузка...</div>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/get_all_knowledge`, { headers: { 'x-admin-token': adminToken } });
+                if (response.status === 401) { logout(); return; }
+                const data = await response.json();
+                
+                allKnowledge = data.knowledge || [];
+                const files = data.files || [];
+                
+                if (files.length === 0) {
+                    fileListEl.innerHTML = '<div class="empty-state">База знаний пуста</div>';
+                    return;
+                }
+                
+                fileListEl.innerHTML = files.map(file => `
+                    <div class="file-item ${currentFile === file.name ? 'active' : ''}" data-file-name="${escapeHtml(file.name)}">
+                        <div style="flex:1">
+                            <div class="file-name">${file.name === 'Ручной ввод' ? '✍️ Ручной ввод' : '📄 ' + escapeHtml(file.name)}</div>
+                            <div class="file-meta">${file.chunks} фрагментов • ${file.total_length} символов</div>
+                        </div>
+                        <button class="delete-btn" data-file-name="${escapeHtml(file.name)}">🗑</button>
+                    </div>
+                `).join('');
+
+                // Обработчики для кнопок удаления файлов
+                document.querySelectorAll('.file-item .delete-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const fname = btn.dataset.fileName;
+                        if (fname) deleteFile(fname);
+                    });
+                });
+
+                // Если текущий файл есть, выделяем его и загружаем фрагменты
+                if (currentFile && files.some(f => f.name === currentFile)) {
+                    selectFile(currentFile);
+                }
+            } catch (error) {
+                fileListEl.innerHTML = `<div class="loading" style="color: var(--danger)">Ошибка: ${error.message}</div>`;
+            }
+        }
+
+        async function uploadFile() {
+            const file = fileInput.files[0];
+            if (!file) {
+                uploadStatus.textContent = '❌ Выберите файл (PDF или DOCX)!';
+                uploadStatus.style.color = 'var(--danger)';
+                return;
+            }
+            if (!file.name.toLowerCase().endsWith('.pdf') && !file.name.toLowerCase().endsWith('.docx')) {
+                uploadStatus.textContent = '❌ Поддерживаются только .pdf и .docx';
+                uploadStatus.style.color = 'var(--danger)';
+                return;
+            }
+
+            uploadStatus.textContent = `⏳ Загрузка "${file.name}"...`;
+            uploadStatus.style.color = 'var(--warning)';
+            uploadBtn.disabled = true;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${API_BASE}/upload_document`, {
+                    method: 'POST',
+                    headers: { 'x-admin-token': adminToken },
+                    body: formData
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    uploadStatus.textContent = `✅ Успех: ${result.message}`;
+                    uploadStatus.style.color = 'var(--success)';
+                    fileInput.value = '';
+                    loadKnowledge();
+                    loadStats();
+                } else {
+                    uploadStatus.textContent = `❌ Ошибка: ${result.error}`;
+                    uploadStatus.style.color = 'var(--danger)';
+                }
+            } catch (error) {
+                uploadStatus.textContent = `❌ Ошибка сети: ${error.message}`;
+                uploadStatus.style.color = 'var(--danger)';
+            } finally {
+                uploadBtn.disabled = false;
+            }
+        }
+
+        function selectFile(fileName) {
+            currentFile = fileName;
+            const isManual = fileName === 'Ручной ввод';
+            knowledgeHeaderTitle.textContent = isManual ? '✍️ Ручной ввод' : `📄 ${fileName}`;
+            knowledgeBadge.innerHTML = isManual
+                ? '<span class="badge badge-manual">Ручной ввод</span>'
+                : `<span class="badge badge-file">Файл</span>`;
+            deleteFileBtn.style.display = 'block';
+            
+            const fragments = allKnowledge.filter(k => k.source_file === fileName);
+            if (fragments.length === 0) {
+                knowledgeViewEl.innerHTML = '<div class="empty-state">Нет фрагментов</div>';
+                return;
+            }
+            
+            knowledgeViewEl.innerHTML = fragments.map((frag, idx) => `
+                <div style="background: var(--bg-input); padding: 15px; border-radius: 12px; border: 1px solid var(--border);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <strong style="color: var(--accent);">Фрагмент #${idx + 1}</strong>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <span style="font-size: 12px; color: var(--text-muted);">${frag.length} символов</span>
+                            <button class="delete-btn" data-knowledge-id="${frag.id}" title="Удалить фрагмент">🗑</button>
+                        </div>
+                    </div>
+                    <div class="knowledge-text">${escapeHtml(frag.text)}</div>
+                </div>
+            `).join('');
+
+            // Обработчики удаления фрагментов
+            knowledgeViewEl.querySelectorAll('.delete-btn[data-knowledge-id]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = btn.dataset.knowledgeId;
+                    if (id) deleteKnowledge(id);
+                });
+            });
+        }
+
+        async function deleteKnowledge(id) {
+            if (!confirm('Удалить этот фрагмент?')) return;
+            try {
+                await fetch(`${API_BASE}/delete_knowledge`, {
+                    method: 'DELETE',
+                    headers: { 'x-admin-token': adminToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: parseInt(id) })
+                });
+                loadKnowledge();
+                if (currentFile) selectFile(currentFile);
+                loadStats();
+            } catch (e) { alert('Ошибка'); }
+        }
+
+        async function deleteFile(fileName) {
+            if (!confirm(`Удалить ВСЕ фрагменты из файла "${fileName}"?`)) return;
+            try {
+                await fetch(`${API_BASE}/delete_file_knowledge?file_name=${encodeURIComponent(fileName)}`, {
+                    method: 'DELETE',
+                    headers: { 'x-admin-token': adminToken }
+                });
+                currentFile = null;
+                knowledgeViewEl.innerHTML = '<div class="empty-state">Выберите файл слева</div>';
+                deleteFileBtn.style.display = 'none';
+                loadKnowledge();
+                loadStats();
+            } catch (e) { alert('Ошибка'); }
+        }
+
+        function deleteCurrentFile() {
+            if (currentFile) deleteFile(currentFile);
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+    </script>
+</body>
+</html>
