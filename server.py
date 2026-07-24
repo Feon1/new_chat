@@ -140,7 +140,7 @@ async def get_embedding(text: str) -> list[float]:
             JINA_API_URL,
             json={"model": "jina-embeddings-v3", "input": [text], "task": "text-matching", "dimensions": 384},
             headers=headers,
-            timeout=30.0
+            timeout=90.0
         )
         response.raise_for_status()
         return response.json()["data"][0]["embedding"]
@@ -261,7 +261,7 @@ async def process_message_core(user_id: str, text: str) -> str:
                     "temperature": 0.3,      # снижаем креативность → меньше лишнего
                     "max_tokens": 850        # ограничиваем длину ответа (если поддерживается)
                 },
-                timeout=30.0
+                timeout=90.0
             )
             response.raise_for_status()
             answer = response.json()["choices"][0]["message"]["content"]
