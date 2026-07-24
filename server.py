@@ -602,7 +602,7 @@ async def get_all_knowledge(request: Request):
     try:
         records, next_page = qdrant.scroll(
             collection_name=COLLECTION_NAME,
-            limit=1000,
+            limit=10000,
             with_payload=True
         )
         knowledge_list = []
@@ -656,7 +656,7 @@ async def delete_file_knowledge(file_name: str, request: Request):
             scroll_filter=models.Filter(
                 must=[models.FieldCondition(key="source_file", match=models.MatchValue(value=file_name))]
             ),
-            limit=1000,
+            limit=10000,
             with_payload=False
         )
         if not records:
