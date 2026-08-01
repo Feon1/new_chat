@@ -139,10 +139,10 @@ except Exception:
     if TELEGRAM_BOT_TOKEN and WEBHOOK_URL:
         set_webhook_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={WEBHOOK_URL}"
 async with httpx.AsyncClient() as client:
-            try:
+    try:
                 response = await client.get(set_webhook_url)
                 print(f"✅ Telegram Webhook установлен: {response.json()}")
-            except Exception as e:
+    except Exception as e:
                 print(f"❌ Ошибка установки Telegram Webhook: {e}")
     else:
         print("⚠️ Переменные TELEGRAM_BOT_TOKEN или WEBHOOK_URL не найдены.")
