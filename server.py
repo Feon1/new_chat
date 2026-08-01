@@ -215,6 +215,8 @@ async def search_knowledge(query: str) -> str:
 
 def save_to_history(user_id: str, role: str, content: str):
     try:
+        import asyncio
+        asyncio.run(asyncio.sleep(0.1))  # 100 мс
         # Проверка дубликата (по user_id, role и content)
         records, _ = qdrant.scroll(
             collection_name=HISTORY_COLLECTION,
