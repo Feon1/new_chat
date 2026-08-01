@@ -138,7 +138,7 @@ except Exception:
     # 6. Автоматическая установка TELEGRAM WEBHOOK
     if TELEGRAM_BOT_TOKEN and WEBHOOK_URL:
         set_webhook_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={WEBHOOK_URL}"
-        async with httpx.AsyncClient() as client:
+async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(set_webhook_url)
                 print(f"✅ Telegram Webhook установлен: {response.json()}")
