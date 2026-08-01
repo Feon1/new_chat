@@ -217,7 +217,7 @@ async def save_to_history(user_id: str, role: str, content: str):
     try:
         # Для бота не проверяем дубли
         if role != "bot":
-            await asyncio.sleep(0.05)  # небольшая задержка для Qdrant
+            await asyncio.sleep(0.2)  # небольшая задержка для Qdrant
 
             records, _ = qdrant.scroll(
                 collection_name=HISTORY_COLLECTION,
