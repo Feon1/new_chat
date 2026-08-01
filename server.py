@@ -128,21 +128,22 @@ async def startup_event():
         print(f"✅ Коллекция '{HISTORY_COLLECTION}' создана")
 
     # 3. Индексы для истории (для быстрых фильтров и дедупликации)
+    # 3. Индексы для истории (для быстрых фильтров и дедупликации)
     indices = [
-        ("user_id", models.PayloadSchemaType.KEYWORD),
-        ("role", models.PayloadSchemaType.KEYWORD),
-        ("content", models.PayloadSchemaType.TEXT)  # Для поиска по тексту
+      ("user_id", models.PayloadSchemaType.KEYWORD),
+      ("role", models.PayloadSchemaType.KEYWORD),
+      ("content", models.PayloadSchemaType.KEYWORD)  # ИСПРАВЛЕНО: KEYWORD вместо TEXT
     ]
     for field_name, field_schema in indices:
-        try:
-            qdrant.create_payload_index(
-                collection_name=HISTORY_COLLECTION,
-                field_name=field_name,
-                field_schema=field_schema
-            )
-            print(f"✅ Индекс для '{field_name}' в chat_history создан")
-        except Exception:
-            print(f"ℹ️ Индекс для '{field_name}' уже существует, пропускаем")
+     try:
+        qdrant.create_payload_index(
+            collection_name=HISTORY_COLLECTION,
+            field_name=field_name,
+            field_schema=field_schema
+        )
+        print(f"✅ Индекс для '{field_name}' в chat_history создан")
+     except Exception as e:
+        print(f"ℹ️ Индекс для '{field_name}' уже существует или ошибка: {e}")
 
     # 4. Коллекция для обработанных событий VK
     try:
