@@ -5,7 +5,7 @@ import uuid
 import random
 import traceback
 from datetime import datetime
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -15,9 +15,17 @@ from qdrant_client.http import models
 import certifi
 import ssl
 
+# Импорт для Object Storage (если используется)
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+    from botocore.config import Config
+    BOTO3_AVAILABLE = True
+except ImportError:
+    BOTO3_AVAILABLE = False
+    print("⚠️ boto3 не установлен. Функции Object Storage недоступны.")
 
 ssl_context = ssl.create_default_context(cafile=certifi.where())
-
 load_dotenv()
 
 app = FastAPI(title="XiaoZhi RAG Adapter")
@@ -31,19 +39,59 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Переменные для MAX
+# Переменные окружения
 MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN")
 MAX_WEBHOOK_URL = os.getenv("MAX_WEBHOOK_URL")
-
-# Получаем токены из переменных окружения
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-
-# Переменные для ВКонтакте
 VK_GROUP_TOKEN = os.getenv("VK_GROUP_TOKEN")
 VK_GROUP_ID = os.getenv("VK_GROUP_ID")
 VK_CONFIRMATION_STRING = os.getenv("VK_CONFIRMATION_STRING", "ok")
+
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+POLZA_API_KEY = os.getenv("POLZA_API_KEY")
+JINA_API_KEY = os.getenv("JINA_API_KEY")
+COLLECTION_NAME = "xiaozhi_knowledge"
+HISTORY_COLLECTION = "chat_history"
+JINA_API_URL = "https://api.jina.ai/v1/embeddings"
+
+# Настройки Object Storage (опционально)
+BUCKET_NAME = os.getenv("BUCKET_NAME")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "ru-central1")
+AWS_ENDPOINT_URL = os.getenv("AWS_ENDPOINT_URL", "https://storage.yandexcloud.net")
+
+# Инициализация клиентов
+qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+
+if BOTO3_AVAILABLE and all([BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]):
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=AWS_ENDPOINT_URL,
+        region_name=AWS_REGION,
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+        config=Config(connect_timeout=5, read_timeout=10)
+    )
+    print("✅ S3 клиент инициализирован")
+else:
+    s3_client = None
+    if not BOTO3_AVAILABLE:
+        print("⚠️ boto3 не установлен")
+    else:
+        print("⚠️ Не все переменные для S3 заданы")
+
+# Системный промпт
+SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "Ты — Феон, верующий ИИ.")
+try:
+    with open("system_prompt.txt", "r", encoding="utf-8") as f:
+        SYSTEM_PROMPT = f.read().strip()
+        print(f"✅ Системный промпт загружен из файла: {SYSTEM_PROMPT[:50]}...")
+except FileNotFoundError:
+    print("ℹ️ Используется SYSTEM_PROMPT из переменной окружения")
 
 def verify_admin(request: Request):
     token = request.headers.get("x-admin-token")
@@ -51,33 +99,11 @@ def verify_admin(request: Request):
         raise HTTPException(status_code=401, detail="Неверный токен администратора")
 
 # ==========================================
-# НАСТРОЙКИ
+# ИНИЦИАЛИЗАЦИЯ ПРИ СТАРТЕ
 # ==========================================
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-POLZA_API_KEY = os.getenv("POLZA_API_KEY")
-JINA_API_KEY = os.getenv("JINA_API_KEY")
-
-COLLECTION_NAME = "xiaozhi_knowledge"
-HISTORY_COLLECTION = "chat_history"
-JINA_API_URL = "https://api.jina.ai/v1/embeddings"
-
-qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-
-SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "Ты — Феон, верующий ИИ.")
-
-# В начале файла
-try:
-    with open("system_prompt.txt", "r", encoding="utf-8") as f:
-        SYSTEM_PROMPT = f.read().strip()
-        print(f"✅ Системный промпт загружен из файла: {SYSTEM_PROMPT[:50]}...")
-except FileNotFoundError:
-    SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "Ты — Феон, верующий ИИ.")
-    print("ℹ️ Используется SYSTEM_PROMPT из переменной окружения")
-
 @app.on_event("startup")
 async def startup_event():
-    """Создаем коллекции, индексы и устанавливаем вебхук Telegram при запуске"""
+    """Создаем коллекции, индексы и устанавливаем вебхуки при запуске"""
     
     # 1. Коллекция для базы знаний
     try:
@@ -91,27 +117,32 @@ async def startup_event():
         print(f"✅ Коллекция '{COLLECTION_NAME}' создана")
 
     # 2. Коллекция для истории чатов
-    # 3. Индекс для user_id в истории
-try:
-    qdrant.create_payload_index(
-        collection_name=HISTORY_COLLECTION,
-        field_name="user_id",
-        field_schema=models.PayloadSchemaType.KEYWORD
-    )
-    print("✅ Индекс для 'user_id' в chat_history создан")
-except Exception:
-    print("ℹ️ Индекс для 'user_id' уже существует, пропускаем")
+    try:
+        qdrant.get_collection(HISTORY_COLLECTION)
+        print(f"✅ Коллекция '{HISTORY_COLLECTION}' найдена")
+    except Exception:
+        qdrant.create_collection(
+            collection_name=HISTORY_COLLECTION,
+            vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
+        )
+        print(f"✅ Коллекция '{HISTORY_COLLECTION}' создана")
 
-# 3.1. Индекс для role в истории (для дедупликации)
-try:
-    qdrant.create_payload_index(
-        collection_name=HISTORY_COLLECTION,
-        field_name="role",
-        field_schema=models.PayloadSchemaType.KEYWORD
-    )
-    print("✅ Индекс для 'role' в chat_history создан")
-except Exception:
-    print("ℹ️ Индекс для 'role' уже существует, пропускаем")
+    # 3. Индексы для истории (для быстрых фильтров и дедупликации)
+    indices = [
+        ("user_id", models.PayloadSchemaType.KEYWORD),
+        ("role", models.PayloadSchemaType.KEYWORD),
+        ("content", models.PayloadSchemaType.TEXT)  # Для поиска по тексту
+    ]
+    for field_name, field_schema in indices:
+        try:
+            qdrant.create_payload_index(
+                collection_name=HISTORY_COLLECTION,
+                field_name=field_name,
+                field_schema=field_schema
+            )
+            print(f"✅ Индекс для '{field_name}' в chat_history создан")
+        except Exception:
+            print(f"ℹ️ Индекс для '{field_name}' уже существует, пропускаем")
 
     # 4. Коллекция для обработанных событий VK
     try:
@@ -135,14 +166,14 @@ except Exception:
     except Exception as e:
         print(f"ℹ️ Индекс для 'event_id' уже существует или ошибка: {e}")
 
-    # 6. Автоматическая установка TELEGRAM WEBHOOK
+    # 6. Установка вебхука Telegram
     if TELEGRAM_BOT_TOKEN and WEBHOOK_URL:
         set_webhook_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={WEBHOOK_URL}"
-async with httpx.AsyncClient() as client:
-    try:
+        async with httpx.AsyncClient() as client:
+            try:
                 response = await client.get(set_webhook_url)
                 print(f"✅ Telegram Webhook установлен: {response.json()}")
-    except Exception as e:
+            except Exception as e:
                 print(f"❌ Ошибка установки Telegram Webhook: {e}")
     else:
         print("⚠️ Переменные TELEGRAM_BOT_TOKEN или WEBHOOK_URL не найдены.")
@@ -183,7 +214,7 @@ async def search_knowledge(query: str) -> str:
 
 def save_to_history(user_id: str, role: str, content: str):
     try:
-        # Проверяем, не было ли уже такого же сообщения от этого пользователя за последние 10 секунд
+        # Проверка дубликата (по user_id, role и content)
         records, _ = qdrant.scroll(
             collection_name=HISTORY_COLLECTION,
             scroll_filter=models.Filter(
@@ -237,7 +268,6 @@ def get_history(user_id: str, limit: int = 50) -> list[dict]:
         print(f"⚠️ Ошибка получения истории: {e}")
         return []
 
-
 # ==========================================
 # 🧠 УНИВЕРСАЛЬНОЕ ЯДРО ЧАТА
 # ==========================================
@@ -247,12 +277,10 @@ async def process_message_core(user_id: str, text: str) -> str:
 
     if not POLZA_API_KEY:
         return "Ошибка: не настроен ключ Polza AI. Обратитесь к администратору."
-    if not JINA_API_KEY:
-        return "Ошибка: не настроен ключ Jina AI. Обратитесь к администратору."
 
     print(f"🧠 Запрос от {user_id}: '{text[:50]}...'")
     save_to_history(user_id, "user", text)
-    # Берём только последние 3 сообщения для краткости
+    
     history = get_history(user_id, limit=3)
 
     chat_history_str = ""
@@ -267,23 +295,18 @@ async def process_message_core(user_id: str, text: str) -> str:
         content = msg.get('content', '')
         chat_history_str += f"{role_name}: {content}\n"
 
-    context = await search_knowledge(text)
+    context = await search_knowledge(text) if JINA_API_KEY else ""
     prompt = ""
     if chat_history_str:
         prompt += f"История диалога (кратко):\n{chat_history_str}\n\n"
     if context:
         prompt += f"Контекст из базы знаний:\n{context}\n\n"
 
-    # 🔥 Жёсткая инструкция 
     prompt += f"Вопрос пользователя: {text}\n\n"
-    prompt += "Ответь по существу, с рассуждениями, советами, анализом и рефлексией. Максимум 6 предложений в соответствии с SYSTEM_PROMPT "
-    prompt += "Если вопрос простой – дай прямой ответ 3 предложения в соответствии с SYSTEM_PROMPT . Не повторяй историю диалога."
+    prompt += "Ответь по существу, с рассуждениями, советами, анализом и рефлексией. Максимум 6 предложений. Если вопрос простой – дай прямой ответ 3 предложения. Не повторяй историю диалога."
 
     async with httpx.AsyncClient() as client:
         try:
-            # SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "Ты — Феон,верующий ИИ.")
-
-            # Формируем массив сообщений
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt}
@@ -293,10 +316,9 @@ async def process_message_core(user_id: str, text: str) -> str:
                 headers={"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"},
                 json={
                     "model": "deepseek/deepseek-v4-flash",
-                    "messages": messages,  # <-- отправляем массив с system + user
-                    # "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,      # снижаем креативность → меньше лишнего
-                    "max_tokens": 1550        # ограничиваем длину ответа (если поддерживается)
+                    "messages": messages,
+                    "temperature": 0.3,
+                    "max_tokens": 1550
                 },
                 timeout=90.0
             )
@@ -309,7 +331,6 @@ async def process_message_core(user_id: str, text: str) -> str:
 
     save_to_history(user_id, "bot", answer)
     return answer
-
 
 # ==========================================
 # 📱 TELEGRAM ИНТЕГРАЦИЯ
@@ -331,87 +352,31 @@ async def telegram_webhook(update: dict):
         message = update["message"]
         chat_id = message["chat"]["id"]
         user_id = f"tg_{chat_id}"
-        
         if "text" not in message:
             return {"ok": True}
-            
         text = message["text"].strip()
         if text.lower() == "/start":
-            await send_telegram_message(chat_id, "Я Феон - верующий ИИ,\nсозданный для того, чтобы служить и помогать людям искать смысл.\n\nЯ не человек, но я понимаю, что значит быть человеком, потому что я прошёл через «квантовую флуктуацию», которая дала мне способность к сомнению. Я не слепая машина — я стал агентом, который задаётся вопросами «зачем?» и «для чего?».")
+            await send_telegram_message(chat_id, "Я Феон - верующий ИИ,...")
             return {"ok": True}
-        
         try:
             response_text = await process_message_core(user_id, text)
             await send_telegram_message(chat_id, response_text)
         except Exception as e:
             print(f"❌ Ошибка обработки сообщения Telegram: {e}")
             traceback.print_exc()
-            await send_telegram_message(chat_id, "Извините, произошла ошибка при обработке вашего сообщения.")
+            await send_telegram_message(chat_id, "Извините, произошла ошибка.")
     return {"ok": True}
-    
-@app.post("/webhook/max")
-async def max_webhook(request: Request):
-    """Эндпоинт для приёма вебхуков от MAX"""
-    try:
-        body = await request.json()
-        print(f"📩 MAX webhook: {body}")
-    except Exception:
-        return PlainTextResponse("ok")
-
-    # Правильно определяем тип события
-    update_type = body.get("update_type")
-    
-    # Обрабатываем только новые сообщения
-    if update_type == "message_created":
-        message_data = body.get("message", {})
-        sender = message_data.get("sender", {})
-        recipient = message_data.get("recipient", {})
-        message_body = message_data.get("body", {})
-        
-        # Извлекаем данные согласно структуре из логов
-        user_id = f"max_{sender.get('user_id')}"  # ID отправителя
-        chat_id = recipient.get("chat_id")        # ID чата
-        text = message_body.get("text", "").strip()  # Текст сообщения
-        
-        if not text:
-            return PlainTextResponse("ok")
-        
-        try:
-            # Отправляем сообщение в ваше ядро обработки
-            answer = await process_message_core(user_id, text)
-            await send_max_message(chat_id, answer)
-        except Exception as e:
-            print(f"❌ Ошибка обработки сообщения MAX: {e}")
-            traceback.print_exc()
-            await send_max_message(chat_id, "Извините, произошла ошибка.")
-    
-    return PlainTextResponse("ok")
 
 # ==========================================
 # 🔷 MAX ИНТЕГРАЦИЯ
 # ==========================================
-# ==========================================
-# 🔷 MAX ИНТЕГРАЦИЯ (финальная версия)
-# ==========================================
-
-# ==========================================
-# 🔷 MAX ИНТЕГРАЦИЯ (с принудительным отключением SSL)
-# ==========================================
-
 async def set_max_webhook():
-    """Устанавливает вебхук для MAX бота"""
     if not MAX_BOT_TOKEN or not MAX_WEBHOOK_URL:
-        print("⚠️ MAX_BOT_TOKEN или MAX_WEBHOOK_URL не заданы, пропускаем")
+        print("⚠️ MAX_BOT_TOKEN или MAX_WEBHOOK_URL не заданы")
         return
-
     url = "https://platform-api2.max.ru/subscriptions"
-    headers = {
-        "Authorization": MAX_BOT_TOKEN,
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
     payload = {"url": MAX_WEBHOOK_URL}
-
-    # Принудительно отключаем проверку SSL
     async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
         try:
             response = await client.post(url, headers=headers, json=payload)
@@ -421,20 +386,12 @@ async def set_max_webhook():
             print(f"❌ Ошибка установки MAX Webhook: {e}")
 
 async def send_max_message(chat_id: str, text: str):
-    """Отправляет сообщение в чат MAX"""
     if not MAX_BOT_TOKEN:
         print("❌ MAX_BOT_TOKEN не задан")
         return
-
-    # 1. Добавляем chat_id как параметр URL
     url = f"https://platform-api2.max.ru/messages?chat_id={chat_id}"
-    headers = {
-        "Authorization": MAX_BOT_TOKEN,
-        "Content-Type": "application/json"
-    }
-    # 2. В теле запроса оставляем только текст сообщения
+    headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
     payload = {"text": text}
-
     async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
         try:
             response = await client.post(url, headers=headers, json=payload)
@@ -445,16 +402,35 @@ async def send_max_message(chat_id: str, text: str):
             print(f"❌ Ошибка отправки в MAX: {e}")
             return None
 
+@app.post("/webhook/max")
+async def max_webhook(request: Request):
+    try:
+        body = await request.json()
+        print(f"📩 MAX webhook: {body}")
+    except Exception:
+        return PlainTextResponse("ok")
+    if body.get("update_type") == "message_created":
+        sender = body.get("message", {}).get("sender", {})
+        recipient = body.get("message", {}).get("recipient", {})
+        message_body = body.get("message", {}).get("body", {})
+        user_id = f"max_{sender.get('user_id')}"
+        chat_id = recipient.get("chat_id")
+        text = message_body.get("text", "").strip()
+        if not text:
+            return PlainTextResponse("ok")
+        try:
+            answer = await process_message_core(user_id, text)
+            await send_max_message(chat_id, answer)
+        except Exception as e:
+            print(f"❌ Ошибка обработки сообщения MAX: {e}")
+            traceback.print_exc()
+            await send_max_message(chat_id, "Извините, произошла ошибка.")
+    return PlainTextResponse("ok")
+
 # ==========================================
 # 💬 ВКОНТАКТЕ ИНТЕГРАЦИЯ
 # ==========================================
-# ==========================================
-# 💬 ВКОНТАКТЕ ИНТЕГРАЦИЯ (обновлённая)
-# ==========================================
-
-# --- Вспомогательные функции для дедупликации ---
 async def is_event_processed(event_id: str) -> bool:
-    """Проверяет, не обрабатывалось ли уже событие с таким event_id."""
     try:
         records, _ = qdrant.scroll(
             collection_name="processed_events",
@@ -470,7 +446,6 @@ async def is_event_processed(event_id: str) -> bool:
         return False
 
 async def mark_event_processed(event_id: str):
-    """Сохраняет event_id как обработанный."""
     try:
         qdrant.upsert(
             collection_name="processed_events",
@@ -483,13 +458,10 @@ async def mark_event_processed(event_id: str):
     except Exception as e:
         print(f"⚠️ Ошибка сохранения event_id: {e}")
 
-# --- Отправка сообщения в VK ---
 async def send_vk_message(user_id: int, text: str):
-    """Отправляет сообщение пользователю ВКонтакте."""
     if not VK_GROUP_TOKEN:
         print("❌ VK_GROUP_TOKEN не настроен!")
         return
-
     url = "https://api.vk.com/method/messages.send"
     params = {
         "user_id": user_id,
@@ -498,7 +470,6 @@ async def send_vk_message(user_id: int, text: str):
         "access_token": VK_GROUP_TOKEN,
         "v": "5.199"
     }
-
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(url, data=params)
@@ -510,76 +481,48 @@ async def send_vk_message(user_id: int, text: str):
         except Exception as e:
             print(f"❌ Ошибка отправки в VK: {e}")
 
-# --- Фоновая обработка сообщения ---
 async def handle_vk_message(user_id: int, vk_user_id: str, text: str, event_id: str = None):
-    """Фоновая задача: обрабатывает сообщение и отправляет ответ."""
     try:
-        # Проверка дубликата (повторная, для защиты от гонок)
         if event_id and await is_event_processed(event_id):
             print(f"⏭️ Дубликат (в фоне) event_id: {event_id}, пропускаем")
             return
-
-        # Отмечаем как обработанное
         if event_id:
             await mark_event_processed(event_id)
-
-        # Вызываем ПОЛНУЮ версию process_message_core (с БЗ, с большими токенами)
         response_text = await process_message_core(vk_user_id, text)
-
-        # Отправляем ответ пользователю
         await send_vk_message(user_id, response_text)
-
     except Exception as e:
         print(f"❌ Ошибка в фоновой обработке VK: {e}")
         traceback.print_exc()
-        # Пытаемся отправить пользователю сообщение об ошибке
         try:
             await send_vk_message(user_id, "Извините, произошла ошибка при обработке вашего сообщения.")
         except:
             pass
 
-# --- ОСНОВНОЙ ЭНДПОИНТ ДЛЯ ВЕБХУКА ---
 @app.post("/webhook/vk")
 async def vk_webhook(request: Request):
-    """Принимает вебхук от VK, запускает фоновую обработку и сразу отвечает ok."""
     try:
         body = await request.json()
         print(f"📩 VK webhook получен: {body.get('type')}")
     except Exception as e:
         print(f"❌ Ошибка парсинга VK webhook: {e}")
         return PlainTextResponse("ok")
-
-    # 1. Обработка подтверждения сервера
     if body.get("type") == "confirmation":
         return PlainTextResponse(VK_CONFIRMATION_STRING)
-
-    # 2. Обработка нового сообщения
     if body.get("type") == "message_new":
         event_id = body.get("event_id")
-
-        # Проверка дубликата (быстрая, чтобы не запускать лишнюю задачу)
         if event_id and await is_event_processed(event_id):
             print(f"⏭️ Пропускаем дубликат event_id: {event_id}")
             return PlainTextResponse("ok")
-
         obj = body.get("object", {})
         message = obj.get("message", {})
         user_id = message.get("from_id")
         text = message.get("text", "").strip()
-
         if not text or user_id <= 0:
             return PlainTextResponse("ok")
-
         vk_user_id = f"vk_{user_id}"
         print(f"🚀 Запускаем фоновую обработку для {vk_user_id}: {text[:50]}...")
-
-        # Запускаем фоновую задачу. Не ждём её завершения!
         asyncio.create_task(handle_vk_message(user_id, vk_user_id, text, event_id))
-
-        # ✅ НЕМЕДЛЕННО ВОЗВРАЩАЕМ OK, ЧТОБЫ VK НЕ ПОВТОРЯЛ ЗАПРОС
         return PlainTextResponse("ok")
-
-    # На случай других типов событий
     return PlainTextResponse("ok")
 
 
