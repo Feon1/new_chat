@@ -91,26 +91,27 @@ async def startup_event():
         print(f"✅ Коллекция '{COLLECTION_NAME}' создана")
 
     # 2. Коллекция для истории чатов
-    try:
-        qdrant.get_collection(HISTORY_COLLECTION)
-        print(f"✅ Коллекция '{HISTORY_COLLECTION}' найдена")
-    except Exception:
-        qdrant.create_collection(
-            collection_name=HISTORY_COLLECTION,
-            vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
-        )
-        print(f"✅ Коллекция '{HISTORY_COLLECTION}' создана")
-
     # 3. Индекс для user_id в истории
-    try:
-        qdrant.create_payload_index(
-            collection_name=HISTORY_COLLECTION,
-            field_name="user_id",
-            field_schema=models.PayloadSchemaType.KEYWORD
-        )
-        print("✅ Индекс для 'user_id' в chat_history создан")
-    except Exception:
-        print("ℹ️ Индекс для 'user_id' уже существует, пропускаем")
+try:
+    qdrant.create_payload_index(
+        collection_name=HISTORY_COLLECTION,
+        field_name="user_id",
+        field_schema=models.PayloadSchemaType.KEYWORD
+    )
+    print("✅ Индекс для 'user_id' в chat_history создан")
+except Exception:
+    print("ℹ️ Индекс для 'user_id' уже существует, пропускаем")
+
+# 3.1. Индекс для role в истории (для дедупликации)
+try:
+    qdrant.create_payload_index(
+        collection_name=HISTORY_COLLECTION,
+        field_name="role",
+        field_schema=models.PayloadSchemaType.KEYWORD
+    )
+    print("✅ Индекс для 'role' в chat_history создан")
+except Exception:
+    print("ℹ️ Индекс для 'role' уже существует, пропускаем")
 
     # 4. Коллекция для обработанных событий VK
     try:
