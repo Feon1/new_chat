@@ -182,6 +182,23 @@ async def search_knowledge(query: str) -> str:
 
 def save_to_history(user_id: str, role: str, content: str):
     try:
+        # Проверяем, не было ли уже такого же сообщения от этого пользователя за последние 10 секунд
+        records, _ = qdrant.scroll(
+            collection_name=HISTORY_COLLECTION,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id)),
+                    models.FieldCondition(key="role", match=models.MatchValue(value=role)),
+                    models.FieldCondition(key="content", match=models.MatchValue(value=content)),
+                ]
+            ),
+            limit=1,
+            with_payload=False
+        )
+        if records:
+            print(f"⏭️ Пропускаем дубликат в истории: {content[:30]}...")
+            return
+
         message_id = str(uuid.uuid4())
         timestamp = datetime.utcnow().isoformat()
         qdrant.upsert(
