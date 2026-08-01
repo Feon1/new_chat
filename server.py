@@ -77,19 +77,7 @@ except FileNotFoundError:
 
 @app.on_event("startup")
 async def startup_event():
-    try:
-        qdrant.get_collection("processed_events")
-        print("✅ Коллекция 'processed_events' найдена")
-    except Exception:
-        qdrant.create_collection(
-            collection_name="processed_events",
-            vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
-        )
-        print("✅ Коллекция 'processed_events' создана") 
-
-    
     """Создаем коллекции, индексы и устанавливаем вебхук Telegram при запуске"""
-    
     
     # 1. Коллекция для базы знаний
     try:
@@ -113,18 +101,40 @@ async def startup_event():
         )
         print(f"✅ Коллекция '{HISTORY_COLLECTION}' создана")
 
-    # 3. Создание индекса для user_id
+    # 3. Индекс для user_id в истории
     try:
         qdrant.create_payload_index(
             collection_name=HISTORY_COLLECTION,
             field_name="user_id",
             field_schema=models.PayloadSchemaType.KEYWORD
         )
-        print("✅ Индекс для 'user_id' успешно создан")
+        print("✅ Индекс для 'user_id' в chat_history создан")
     except Exception:
         print("ℹ️ Индекс для 'user_id' уже существует, пропускаем")
 
-    # 4. Автоматическая установка TELEGRAM WEBHOOK
+    # 4. Коллекция для обработанных событий VK
+    try:
+        qdrant.get_collection("processed_events")
+        print("✅ Коллекция 'processed_events' найдена")
+    except Exception:
+        qdrant.create_collection(
+            collection_name="processed_events",
+            vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
+        )
+        print("✅ Коллекция 'processed_events' создана")
+
+    # 5. Индекс для event_id в processed_events
+    try:
+        qdrant.create_payload_index(
+            collection_name="processed_events",
+            field_name="event_id",
+            field_schema=models.PayloadSchemaType.KEYWORD
+        )
+        print("✅ Индекс для 'event_id' в processed_events создан")
+    except Exception as e:
+        print(f"ℹ️ Индекс для 'event_id' уже существует или ошибка: {e}")
+
+    # 6. Автоматическая установка TELEGRAM WEBHOOK
     if TELEGRAM_BOT_TOKEN and WEBHOOK_URL:
         set_webhook_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={WEBHOOK_URL}"
         async with httpx.AsyncClient() as client:
@@ -134,11 +144,9 @@ async def startup_event():
             except Exception as e:
                 print(f"❌ Ошибка установки Telegram Webhook: {e}")
     else:
-        print("⚠️ Переменные TELEGRAM_BOT_TOKEN или WEBHOOK_URL не найдены.") 
-        
+        print("⚠️ Переменные TELEGRAM_BOT_TOKEN или WEBHOOK_URL не найдены.")
 
-
-        # 5. Установка вебхука для MAX
+    # 7. Установка вебхука для MAX
     await set_max_webhook()
 
 # ==========================================
