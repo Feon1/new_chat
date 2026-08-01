@@ -544,7 +544,7 @@ async def vk_webhook(request: Request):
         if not text or user_id <= 0:
             return PlainTextResponse("ok")
 
-        vk_user_id = f"vk_{user_id"
+        vk_user_id = f"vk_{user_id}"
         print(f"🚀 Запускаем фоновую обработку для {vk_user_id}: {text[:50]}...")
 
         # Запускаем фоновую задачу. Не ждём её завершения!
