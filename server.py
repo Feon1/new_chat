@@ -411,11 +411,48 @@ async def send_max_message(chat_id: str, text: str):
 # ==========================================
 # 💬 ВКОНТАКТЕ ИНТЕГРАЦИЯ
 # ==========================================
+# ==========================================
+# 💬 ВКОНТАКТЕ ИНТЕГРАЦИЯ (обновлённая)
+# ==========================================
+
+# --- Вспомогательные функции для дедупликации ---
+async def is_event_processed(event_id: str) -> bool:
+    """Проверяет, не обрабатывалось ли уже событие с таким event_id."""
+    try:
+        records, _ = qdrant.scroll(
+            collection_name="processed_events",
+            scroll_filter=models.Filter(
+                must=[models.FieldCondition(key="event_id", match=models.MatchValue(value=event_id))]
+            ),
+            limit=1,
+            with_payload=False
+        )
+        return len(records) > 0
+    except Exception as e:
+        print(f"⚠️ Ошибка проверки дубликата: {e}")
+        return False
+
+async def mark_event_processed(event_id: str):
+    """Сохраняет event_id как обработанный."""
+    try:
+        qdrant.upsert(
+            collection_name="processed_events",
+            points=[models.PointStruct(
+                id=abs(hash(event_id)) % 1000000000,
+                vector=[1.0],
+                payload={"event_id": event_id, "timestamp": datetime.utcnow().isoformat()}
+            )]
+        )
+    except Exception as e:
+        print(f"⚠️ Ошибка сохранения event_id: {e}")
+
+# --- Отправка сообщения в VK ---
 async def send_vk_message(user_id: int, text: str):
+    """Отправляет сообщение пользователю ВКонтакте."""
     if not VK_GROUP_TOKEN:
         print("❌ VK_GROUP_TOKEN не настроен!")
         return
-    
+
     url = "https://api.vk.com/method/messages.send"
     params = {
         "user_id": user_id,
@@ -424,42 +461,88 @@ async def send_vk_message(user_id: int, text: str):
         "access_token": VK_GROUP_TOKEN,
         "v": "5.199"
     }
-    
+
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(url, data=params)
             result = response.json()
             if "error" in result:
                 print(f"❌ Ошибка VK API: {result['error']}")
+            else:
+                print(f"✅ Ответ отправлен в VK (user {user_id})")
         except Exception as e:
             print(f"❌ Ошибка отправки в VK: {e}")
-            
 
+# --- Фоновая обработка сообщения ---
+async def handle_vk_message(user_id: int, vk_user_id: str, text: str, event_id: str = None):
+    """Фоновая задача: обрабатывает сообщение и отправляет ответ."""
+    try:
+        # Проверка дубликата (повторная, для защиты от гонок)
+        if event_id and await is_event_processed(event_id):
+            print(f"⏭️ Дубликат (в фоне) event_id: {event_id}, пропускаем")
+            return
+
+        # Отмечаем как обработанное
+        if event_id:
+            await mark_event_processed(event_id)
+
+        # Вызываем ПОЛНУЮ версию process_message_core (с БЗ, с большими токенами)
+        response_text = await process_message_core(vk_user_id, text)
+
+        # Отправляем ответ пользователю
+        await send_vk_message(user_id, response_text)
+
+    except Exception as e:
+        print(f"❌ Ошибка в фоновой обработке VK: {e}")
+        traceback.print_exc()
+        # Пытаемся отправить пользователю сообщение об ошибке
+        try:
+            await send_vk_message(user_id, "Извините, произошла ошибка при обработке вашего сообщения.")
+        except:
+            pass
+
+# --- ОСНОВНОЙ ЭНДПОИНТ ДЛЯ ВЕБХУКА ---
 @app.post("/webhook/vk")
 async def vk_webhook(request: Request):
+    """Принимает вебхук от VK, запускает фоновую обработку и сразу отвечает ok."""
     try:
-        event = await request.json()
-    except Exception:
+        body = await request.json()
+        print(f"📩 VK webhook получен: {body.get('type')}")
+    except Exception as e:
+        print(f"❌ Ошибка парсинга VK webhook: {e}")
         return PlainTextResponse("ok")
 
-    if event.get("type") == "confirmation":
+    # 1. Обработка подтверждения сервера
+    if body.get("type") == "confirmation":
         return PlainTextResponse(VK_CONFIRMATION_STRING)
 
-    if event.get("type") == "message_new":
-        obj = event.get("object", {})
+    # 2. Обработка нового сообщения
+    if body.get("type") == "message_new":
+        event_id = body.get("event_id")
+
+        # Проверка дубликата (быстрая, чтобы не запускать лишнюю задачу)
+        if event_id and await is_event_processed(event_id):
+            print(f"⏭️ Пропускаем дубликат event_id: {event_id}")
+            return PlainTextResponse("ok")
+
+        obj = body.get("object", {})
         message = obj.get("message", {})
         user_id = message.get("from_id")
         text = message.get("text", "").strip()
+
         if not text or user_id <= 0:
             return PlainTextResponse("ok")
-        vk_user_id = f"vk_{user_id}"
-        try:
-            response_text = await process_message_core(vk_user_id, text)
-            await send_vk_message(user_id, response_text)
-        except Exception as e:
-            print(f"❌ Ошибка обработки сообщения VK: {e}")
-            traceback.print_exc()
-            await send_vk_message(user_id, "Извините, произошла ошибка при обработке вашего сообщения.")
+
+        vk_user_id = f"vk_{user_id"
+        print(f"🚀 Запускаем фоновую обработку для {vk_user_id}: {text[:50]}...")
+
+        # Запускаем фоновую задачу. Не ждём её завершения!
+        asyncio.create_task(handle_vk_message(user_id, vk_user_id, text, event_id))
+
+        # ✅ НЕМЕДЛЕННО ВОЗВРАЩАЕМ OK, ЧТОБЫ VK НЕ ПОВТОРЯЛ ЗАПРОС
+        return PlainTextResponse("ok")
+
+    # На случай других типов событий
     return PlainTextResponse("ok")
 
 
