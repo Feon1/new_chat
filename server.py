@@ -653,7 +653,7 @@ async def get_history_endpoint(user_id: str):
 async def get_all_users(request: Request):
     verify_admin(request)
     try:
-        records, next_page = qdrant.scroll(collection_name=HISTORY_COLLECTION, limit=10000, with_payload=True)
+        records, next_page = qdrant.scroll(collection_name=HISTORY_COLLECTION, limit=300, with_payload=True)
         users = {}
         for r in records:
             if r.payload:
@@ -688,7 +688,7 @@ async def get_all_knowledge(request: Request):
     try:
         records, next_page = qdrant.scroll(
             collection_name=COLLECTION_NAME,
-            limit=10000,
+            limit=500,
             with_payload=True
         )
         knowledge_list = []
@@ -742,7 +742,7 @@ async def delete_file_knowledge(file_name: str, request: Request):
             scroll_filter=models.Filter(
                 must=[models.FieldCondition(key="source_file", match=models.MatchValue(value=file_name))]
             ),
-            limit=10000,
+            limit=500,
             with_payload=False
         )
         if not records:
