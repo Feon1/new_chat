@@ -215,24 +215,26 @@ async def search_knowledge(query: str) -> str:
 
 def save_to_history(user_id: str, role: str, content: str):
     try:
-        import asyncio
-        asyncio.run(asyncio.sleep(0.1))  # 100 мс
-        # Проверка дубликата (по user_id, role и content)
-        records, _ = qdrant.scroll(
-            collection_name=HISTORY_COLLECTION,
-            scroll_filter=models.Filter(
-                must=[
-                    models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id)),
-                    models.FieldCondition(key="role", match=models.MatchValue(value=role)),
-                    models.FieldCondition(key="content", match=models.MatchValue(value=content)),
-                ]
-            ),
-            limit=1,
-            with_payload=False
-        )
-        if records:
-            print(f"⏭️ Пропускаем дубликат в истории: {content[:30]}...")
-            return
+        # Для бота не проверяем дубли (или проверяем только по user_id и role)
+        if role != "bot":
+            import asyncio
+            asyncio.run(asyncio.sleep(0.05))
+
+            records, _ = qdrant.scroll(
+                collection_name=HISTORY_COLLECTION,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id)),
+                        models.FieldCondition(key="role", match=models.MatchValue(value=role)),
+                        models.FieldCondition(key="content", match=models.MatchValue(value=content)),
+                    ]
+                ),
+                limit=1,
+                with_payload=False
+            )
+            if records:
+                print(f"⏭️ Пропускаем дубликат (user) в истории: {content[:30]}...")
+                return
 
         message_id = str(uuid.uuid4())
         timestamp = datetime.utcnow().isoformat()
@@ -331,7 +333,7 @@ async def process_message_core(user_id: str, text: str) -> str:
             print(f"❌ Ошибка при вызове Polza API: {e}")
             traceback.print_exc()
             return "Извините, произошла ошибка при обработке запроса к ИИ. Попробуйте позже."
-
+    print(f"🧠 Ответ для {user_id} сохранён в истории") 
     save_to_history(user_id, "bot", answer)
     return answer
 
