@@ -213,12 +213,11 @@ async def search_knowledge(query: str) -> str:
         print(f"⚠️ Ошибка поиска: {e}")
         return ""
 
-def save_to_history(user_id: str, role: str, content: str):
+async def save_to_history(user_id: str, role: str, content: str):
     try:
-        # Для бота не проверяем дубли (или проверяем только по user_id и role)
+        # Для бота не проверяем дубли
         if role != "bot":
-            import asyncio
-            asyncio.run(asyncio.sleep(0.05))
+            await asyncio.sleep(0.05)  # небольшая задержка для Qdrant
 
             records, _ = qdrant.scroll(
                 collection_name=HISTORY_COLLECTION,
@@ -284,7 +283,7 @@ async def process_message_core(user_id: str, text: str) -> str:
         return "Ошибка: не настроен ключ Polza AI. Обратитесь к администратору."
 
     print(f"🧠 Запрос от {user_id}: '{text[:50]}...'")
-    save_to_history(user_id, "user", text)
+    await save_to_history(user_id, "user", text)
     
     history = get_history(user_id, limit=3)
 
@@ -334,7 +333,7 @@ async def process_message_core(user_id: str, text: str) -> str:
             traceback.print_exc()
             return "Извините, произошла ошибка при обработке запроса к ИИ. Попробуйте позже."
     print(f"🧠 Ответ для {user_id} сохранён в истории") 
-    save_to_history(user_id, "bot", answer)
+    await save_to_history(user_id, "bot", answer)
     return answer
 
 # ==========================================
