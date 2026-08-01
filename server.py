@@ -77,6 +77,17 @@ except FileNotFoundError:
 
 @app.on_event("startup")
 async def startup_event():
+    try:
+        qdrant.get_collection("processed_events")
+        print("✅ Коллекция 'processed_events' найдена")
+    except Exception:
+        qdrant.create_collection(
+            collection_name="processed_events",
+            vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
+        )
+        print("✅ Коллекция 'processed_events' создана") 
+
+    
     """Создаем коллекции, индексы и устанавливаем вебхук Telegram при запуске"""
     
     
