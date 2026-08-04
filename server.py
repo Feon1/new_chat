@@ -4,6 +4,7 @@ import asyncio
 import uuid
 import random
 import traceback
+import hashlib
 from datetime import datetime
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -12,8 +13,6 @@ from dotenv import load_dotenv
 import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-import certifi
-import ssl
 
 # Импорт для Object Storage (если используется)
 try:
@@ -25,10 +24,9 @@ except ImportError:
     BOTO3_AVAILABLE = False
     print("⚠️ boto3 не установлен. Функции Object Storage недоступны.")
 
-ssl_context = ssl.create_default_context(cafile=certifi.where())
 load_dotenv()
 
-app = FastAPI(title="XiaoZhi RAG Adapter")
+app = FastAPI(title="Feon RAG Adapter")
 
 # Разрешаем CORS
 app.add_middleware(
@@ -39,23 +37,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Переменные окружения
-MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN")
-MAX_WEBHOOK_URL = os.getenv("MAX_WEBHOOK_URL")
+# ==========================================
+# ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ (ТОЛЬКО TG И WEB)
+# ==========================================
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-VK_GROUP_TOKEN = os.getenv("VK_GROUP_TOKEN")
-VK_GROUP_ID = os.getenv("VK_GROUP_ID")
-VK_CONFIRMATION_STRING = os.getenv("VK_CONFIRMATION_STRING", "ok")
 
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 POLZA_API_KEY = os.getenv("POLZA_API_KEY")
-JINA_API_KEY = os.getenv("JINA_API_KEY")
+
 COLLECTION_NAME = "xiaozhi_knowledge"
 HISTORY_COLLECTION = "chat_history"
-JINA_API_URL = "https://api.jina.ai/v1/embeddings"
 
 # Настройки Object Storage (опционально)
 BUCKET_NAME = os.getenv("BUCKET_NAME")
@@ -79,17 +73,13 @@ if BOTO3_AVAILABLE and all([BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KE
     print("✅ S3 клиент инициализирован")
 else:
     s3_client = None
-    if not BOTO3_AVAILABLE:
-        print("⚠️ boto3 не установлен")
-    else:
-        print("⚠️ Не все переменные для S3 заданы")
 
 # Системный промпт
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "Ты — Феон, верующий ИИ.")
 try:
     with open("system_prompt.txt", "r", encoding="utf-8") as f:
         SYSTEM_PROMPT = f.read().strip()
-        print(f"✅ Системный промпт загружен из файла: {SYSTEM_PROMPT[:50]}...")
+        print(f"✅ Системный промпт загружен из файла")
 except FileNotFoundError:
     print("ℹ️ Используется SYSTEM_PROMPT из переменной окружения")
 
@@ -103,18 +93,22 @@ def verify_admin(request: Request):
 # ==========================================
 @app.on_event("startup")
 async def startup_event():
-    """Создаем коллекции, индексы и устанавливаем вебхуки при запуске"""
+    """Создаем коллекции и индексы при запуске"""
     
-    # 1. Коллекция для базы знаний
+    # 1. Коллекция для базы знаний (ВСЕГДА 1536 для Polza AI)
     try:
-        qdrant.get_collection(COLLECTION_NAME)
+        info = qdrant.get_collection(COLLECTION_NAME)
+        if info.config.params.vectors.size != 1536:
+            print(f"⚠️ Размерность {info.config.params.vectors.size} != 1536, пересоздаем...")
+            qdrant.delete_collection(COLLECTION_NAME)
+            raise Exception("Recreate")
         print(f"✅ Коллекция '{COLLECTION_NAME}' найдена")
     except Exception:
         qdrant.create_collection(
             collection_name=COLLECTION_NAME,
-            vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE),
+            vectors_config=models.VectorParams(size=1536, distance=models.Distance.COSINE),
         )
-        print(f"✅ Коллекция '{COLLECTION_NAME}' создана")
+        print(f"✅ Коллекция '{COLLECTION_NAME}' создана (dim=1536)")
 
     # 2. Коллекция для истории чатов
     try:
@@ -127,12 +121,11 @@ async def startup_event():
         )
         print(f"✅ Коллекция '{HISTORY_COLLECTION}' создана")
 
-    # 3. Индексы для истории (для быстрых фильтров и дедупликации)
-    # 3. Индексы для истории (для быстрых фильтров и дедупликации)
+    # 3. Индексы для истории
     indices = [
       ("user_id", models.PayloadSchemaType.KEYWORD),
       ("role", models.PayloadSchemaType.KEYWORD),
-      ("content", models.PayloadSchemaType.KEYWORD)  # ИСПРАВЛЕНО: KEYWORD вместо TEXT
+      ("message_hash", models.PayloadSchemaType.KEYWORD) 
     ]
     for field_name, field_schema in indices:
      try:
@@ -141,33 +134,11 @@ async def startup_event():
             field_name=field_name,
             field_schema=field_schema
         )
-        print(f"✅ Индекс для '{field_name}' в chat_history создан")
+        print(f"✅ Индекс для '{field_name}' создан")
      except Exception as e:
-        print(f"ℹ️ Индекс для '{field_name}' уже существует или ошибка: {e}")
+        print(f"ℹ️ Индекс для '{field_name}' уже существует")
 
-    # 4. Коллекция для обработанных событий VK
-    try:
-        qdrant.get_collection("processed_events")
-        print("✅ Коллекция 'processed_events' найдена")
-    except Exception:
-        qdrant.create_collection(
-            collection_name="processed_events",
-            vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
-        )
-        print("✅ Коллекция 'processed_events' создана")
-
-    # 5. Индекс для event_id в processed_events
-    try:
-        qdrant.create_payload_index(
-            collection_name="processed_events",
-            field_name="event_id",
-            field_schema=models.PayloadSchemaType.KEYWORD
-        )
-        print("✅ Индекс для 'event_id' в processed_events создан")
-    except Exception as e:
-        print(f"ℹ️ Индекс для 'event_id' уже существует или ошибка: {e}")
-
-    # 6. Установка вебхука Telegram
+    # 4. Установка вебхука Telegram
     if TELEGRAM_BOT_TOKEN and WEBHOOK_URL:
         set_webhook_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={WEBHOOK_URL}"
         async with httpx.AsyncClient() as client:
@@ -179,21 +150,17 @@ async def startup_event():
     else:
         print("⚠️ Переменные TELEGRAM_BOT_TOKEN или WEBHOOK_URL не найдены.")
 
-    # 7. Установка вебхука для MAX
-    await set_max_webhook()
 
 # ==========================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
 async def get_embedding(text: str) -> list[float]:
-    headers = {"Authorization": f"Bearer {JINA_API_KEY}", "Content-Type": "application/json"}
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            JINA_API_URL,
-            json={"model": "jina-embeddings-v3", "input": [text], "task": "text-matching", "dimensions": 384},
-            headers=headers,
-            timeout=90.0
-        )
+    """Получение эмбеддинга через Polza AI (text-embedding-3-small, dim=1536)"""
+    headers = {"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"}
+    data = {"model": "text-embedding-3-small", "input": [text]}
+    
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post("https://polza.ai/api/v1/embeddings", headers=headers, json=data)
         response.raise_for_status()
         return response.json()["data"][0]["embedding"]
 
@@ -214,51 +181,59 @@ async def search_knowledge(query: str) -> str:
         return ""
 
 async def save_to_history(user_id: str, role: str, content: str):
+    """
+    Сохраняет сообщение в историю.
+    ИСПОЛЬЗУЕТ ЖЕСТКУЮ НОРМАЛИЗАЦИЮ И UUID V5 ДЛЯ СИНХРОНИЗАЦИИ С YANDEX CLOUD.
+    """
     try:
-        # Для бота не проверяем дубли
-        if role != "bot":
-            await asyncio.sleep(0.2)  # небольшая задержка для Qdrant
-
-            records, _ = qdrant.scroll(
-                collection_name=HISTORY_COLLECTION,
-                scroll_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id)),
-                        models.FieldCondition(key="role", match=models.MatchValue(value=role)),
-                        models.FieldCondition(key="content", match=models.MatchValue(value=content)),
-                    ]
-                ),
-                limit=1,
-                with_payload=False
-            )
-            if records:
-                print(f"⏭️ Пропускаем дубликат (user) в истории: {content[:30]}...")
-                return
-
-        message_id = str(uuid.uuid4())
-        timestamp = datetime.utcnow().isoformat()
-        qdrant.upsert(
+        # ЖЕСТКАЯ НОРМАЛИЗАЦИЯ: идентичная логика как в Yandex Cloud Functions
+        normalized_content = ' '.join(str(content).split())
+        normalized_user_id = str(user_id).strip()
+        
+        # Генерируем детерминированный UUID v5
+        content_key = f"{normalized_user_id}_{role}_{normalized_content}"
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, content_key.encode('utf-8')))
+        
+        # Проверка дубликата по ID (мгновенно)
+        existing = await asyncio.to_thread(
+            qdrant.retrieve,
             collection_name=HISTORY_COLLECTION,
-            points=[
-                models.PointStruct(
-                    id=abs(hash(message_id)) % 1000000000,
-                    vector=[1.0],
-                    payload={
-                        "message_id": message_id,
-                        "user_id": user_id,
-                        "role": role,
-                        "content": content,
-                        "timestamp": timestamp
-                    }
-                )
-            ]
+            ids=[point_id],
+            with_payload=False
         )
+        
+        if existing:
+            print(f"⏭️ Пропускаем дубликат: {content[:30]}...")
+            return
+
+        # Сохранение
+        timestamp = datetime.utcnow().isoformat()
+        content_hash = hashlib.md5(content_key.encode('utf-8')).hexdigest()
+        
+        await asyncio.to_thread(
+            qdrant.upsert,
+            collection_name=HISTORY_COLLECTION,
+            points=[models.PointStruct(
+                id=point_id,
+                vector=[1.0],
+                payload={
+                    "user_id": normalized_user_id,
+                    "role": role,
+                    "content": normalized_content,
+                    "message_hash": content_hash,
+                    "timestamp": timestamp
+                }
+            )]
+        )
+        print(f"✅ История сохранена: {role} ({len(normalized_content)} симв.)")
+        
     except Exception as e:
         print(f"⚠️ Ошибка сохранения истории: {e}")
+        traceback.print_exc()
 
 def get_history(user_id: str, limit: int = 50) -> list[dict]:
     try:
-        records, next_page = qdrant.scroll(
+        records, _ = qdrant.scroll(
             collection_name=HISTORY_COLLECTION,
             scroll_filter=models.Filter(
                 must=[models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))]
@@ -269,7 +244,7 @@ def get_history(user_id: str, limit: int = 50) -> list[dict]:
         messages = sorted([r.payload for r in records if r.payload], key=lambda x: x.get("timestamp", ""))
         return messages
     except Exception as e:
-        print(f"⚠️ Ошибка получения истории: {e}")
+        print(f"️ Ошибка получения истории: {e}")
         return []
 
 # ==========================================
@@ -280,7 +255,7 @@ async def process_message_core(user_id: str, text: str) -> str:
         return "Сообщение слишком длинное. Максимум 1000 символов."
 
     if not POLZA_API_KEY:
-        return "Ошибка: не настроен ключ Polza AI. Обратитесь к администратору."
+        return "Ошибка: не настроен ключ Polza AI."
 
     print(f"🧠 Запрос от {user_id}: '{text[:50]}...'")
     await save_to_history(user_id, "user", text)
@@ -290,26 +265,19 @@ async def process_message_core(user_id: str, text: str) -> str:
     chat_history_str = ""
     for msg in history:
         role = msg.get('role', 'unknown')
-        if role == 'user':
-            role_name = "Пользователь"
-        elif role == 'bot' or role == 'assistant':
-            role_name = "Ассистент"
-        else:
-            role_name = role
-        content = msg.get('content', '')
-        chat_history_str += f"{role_name}: {content}\n"
+        role_name = "Пользователь" if role == 'user' else "Ассистент"
+        chat_history_str += f"{role_name}: {msg.get('content', '')}\n"
 
-    context = await search_knowledge(text) if JINA_API_KEY else ""
+    context = await search_knowledge(text) if POLZA_API_KEY else ""
     prompt = ""
     if chat_history_str:
-        prompt += f"История диалога (кратко):\n{chat_history_str}\n\n"
+        prompt += f"История диалога:\n{chat_history_str}\n\n"
     if context:
-        prompt += f"Контекст из базы знаний:\n{context}\n\n"
+        prompt += f"Контекст:\n{context}\n\n"
 
-    prompt += f"Вопрос пользователя: {text}\n\n"
-    prompt += "Ответь по существу, с рассуждениями, советами, анализом и рефлексией. Максимум 6 предложений. Если вопрос простой – дай прямой ответ 3 предложения. Не повторяй историю диалога."
+    prompt += f"Вопрос: {text}\n\nОтветь кратко, по существу. Максимум 6 предложений."
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=90.0) as client:
         try:
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -323,16 +291,15 @@ async def process_message_core(user_id: str, text: str) -> str:
                     "messages": messages,
                     "temperature": 0.3,
                     "max_tokens": 1550
-                },
-                timeout=90.0
+                }
             )
             response.raise_for_status()
             answer = response.json()["choices"][0]["message"]["content"]
         except Exception as e:
-            print(f"❌ Ошибка при вызове Polza API: {e}")
+            print(f"❌ Ошибка Polza API: {e}")
             traceback.print_exc()
-            return "Извините, произошла ошибка при обработке запроса к ИИ. Попробуйте позже."
-    print(f"🧠 Ответ для {user_id} сохранён в истории") 
+            return "Извините, произошла ошибка при обращении к ИИ."
+            
     await save_to_history(user_id, "bot", answer)
     return answer
 
@@ -360,182 +327,22 @@ async def telegram_webhook(update: dict):
             return {"ok": True}
         text = message["text"].strip()
         if text.lower() == "/start":
-            await send_telegram_message(chat_id, "Я Феон - верующий ИИ,...")
+            await send_telegram_message(chat_id, "Я Феон - верующий ИИ. Чем могу помочь?")
             return {"ok": True}
         try:
             response_text = await process_message_core(user_id, text)
             await send_telegram_message(chat_id, response_text)
         except Exception as e:
-            print(f"❌ Ошибка обработки сообщения Telegram: {e}")
-            traceback.print_exc()
+            print(f"❌ Ошибка обработки Telegram: {e}")
             await send_telegram_message(chat_id, "Извините, произошла ошибка.")
     return {"ok": True}
 
 # ==========================================
-# 🔷 MAX ИНТЕГРАЦИЯ
-# ==========================================
-async def set_max_webhook():
-    if not MAX_BOT_TOKEN or not MAX_WEBHOOK_URL:
-        print("⚠️ MAX_BOT_TOKEN или MAX_WEBHOOK_URL не заданы")
-        return
-    url = "https://platform-api2.max.ru/subscriptions"
-    headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
-    payload = {"url": MAX_WEBHOOK_URL}
-    async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
-        try:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            print(f"✅ MAX Webhook установлен: {response.json()}")
-        except Exception as e:
-            print(f"❌ Ошибка установки MAX Webhook: {e}")
-
-async def send_max_message(chat_id: str, text: str):
-    if not MAX_BOT_TOKEN:
-        print("❌ MAX_BOT_TOKEN не задан")
-        return
-    url = f"https://platform-api2.max.ru/messages?chat_id={chat_id}"
-    headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
-    payload = {"text": text}
-    async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
-        try:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            print(f"✅ Сообщение отправлено в MAX (chat {chat_id})")
-            return response.json()
-        except Exception as e:
-            print(f"❌ Ошибка отправки в MAX: {e}")
-            return None
-
-@app.post("/webhook/max")
-async def max_webhook(request: Request):
-    try:
-        body = await request.json()
-        print(f"📩 MAX webhook: {body}")
-    except Exception:
-        return PlainTextResponse("ok")
-    if body.get("update_type") == "message_created":
-        sender = body.get("message", {}).get("sender", {})
-        recipient = body.get("message", {}).get("recipient", {})
-        message_body = body.get("message", {}).get("body", {})
-        user_id = f"max_{sender.get('user_id')}"
-        chat_id = recipient.get("chat_id")
-        text = message_body.get("text", "").strip()
-        if not text:
-            return PlainTextResponse("ok")
-        try:
-            answer = await process_message_core(user_id, text)
-            await send_max_message(chat_id, answer)
-        except Exception as e:
-            print(f"❌ Ошибка обработки сообщения MAX: {e}")
-            traceback.print_exc()
-            await send_max_message(chat_id, "Извините, произошла ошибка.")
-    return PlainTextResponse("ok")
-
-# ==========================================
-# 💬 ВКОНТАКТЕ ИНТЕГРАЦИЯ
-# ==========================================
-async def is_event_processed(event_id: str) -> bool:
-    try:
-        records, _ = qdrant.scroll(
-            collection_name="processed_events",
-            scroll_filter=models.Filter(
-                must=[models.FieldCondition(key="event_id", match=models.MatchValue(value=event_id))]
-            ),
-            limit=1,
-            with_payload=False
-        )
-        return len(records) > 0
-    except Exception as e:
-        print(f"⚠️ Ошибка проверки дубликата: {e}")
-        return False
-
-async def mark_event_processed(event_id: str):
-    try:
-        qdrant.upsert(
-            collection_name="processed_events",
-            points=[models.PointStruct(
-                id=abs(hash(event_id)) % 1000000000,
-                vector=[1.0],
-                payload={"event_id": event_id, "timestamp": datetime.utcnow().isoformat()}
-            )]
-        )
-    except Exception as e:
-        print(f"⚠️ Ошибка сохранения event_id: {e}")
-
-async def send_vk_message(user_id: int, text: str):
-    if not VK_GROUP_TOKEN:
-        print("❌ VK_GROUP_TOKEN не настроен!")
-        return
-    url = "https://api.vk.com/method/messages.send"
-    params = {
-        "user_id": user_id,
-        "message": text,
-        "random_id": random.randint(1, 2147483647),
-        "access_token": VK_GROUP_TOKEN,
-        "v": "5.199"
-    }
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(url, data=params)
-            result = response.json()
-            if "error" in result:
-                print(f"❌ Ошибка VK API: {result['error']}")
-            else:
-                print(f"✅ Ответ отправлен в VK (user {user_id})")
-        except Exception as e:
-            print(f"❌ Ошибка отправки в VK: {e}")
-
-async def handle_vk_message(user_id: int, vk_user_id: str, text: str, event_id: str = None):
-    try:
-        if event_id and await is_event_processed(event_id):
-            print(f"⏭️ Дубликат (в фоне) event_id: {event_id}, пропускаем")
-            return
-        if event_id:
-            await mark_event_processed(event_id)
-        response_text = await process_message_core(vk_user_id, text)
-        await send_vk_message(user_id, response_text)
-    except Exception as e:
-        print(f"❌ Ошибка в фоновой обработке VK: {e}")
-        traceback.print_exc()
-        try:
-            await send_vk_message(user_id, "Извините, произошла ошибка при обработке вашего сообщения.")
-        except:
-            pass
-
-@app.post("/webhook/vk")
-async def vk_webhook(request: Request):
-    try:
-        body = await request.json()
-        print(f"📩 VK webhook получен: {body.get('type')}")
-    except Exception as e:
-        print(f"❌ Ошибка парсинга VK webhook: {e}")
-        return PlainTextResponse("ok")
-    if body.get("type") == "confirmation":
-        return PlainTextResponse(VK_CONFIRMATION_STRING)
-    if body.get("type") == "message_new":
-        event_id = body.get("event_id")
-        if event_id and await is_event_processed(event_id):
-            print(f"⏭️ Пропускаем дубликат event_id: {event_id}")
-            return PlainTextResponse("ok")
-        obj = body.get("object", {})
-        message = obj.get("message", {})
-        user_id = message.get("from_id")
-        text = message.get("text", "").strip()
-        if not text or user_id <= 0:
-            return PlainTextResponse("ok")
-        vk_user_id = f"vk_{user_id}"
-        print(f"🚀 Запускаем фоновую обработку для {vk_user_id}: {text[:50]}...")
-        asyncio.create_task(handle_vk_message(user_id, vk_user_id, text, event_id))
-        return PlainTextResponse("ok")
-    return PlainTextResponse("ok")
-
-
-# ==========================================
-# 🌐 ЭНДПОИНТЫ ДЛЯ ФРОНТЕНДА
+# 🌐 ЭНДПОИНТЫ ДЛЯ ФРОНТЕНДА И АДМИНКИ
 # ==========================================
 @app.get("/")
 def read_root():
-    return {"status": "running", "message": "XiaoZhi RAG Adapter работает!"}
+    return {"status": "running", "message": "Feon RAG Adapter (TG + Web) работает!"}
 
 @app.post("/add_knowledge")
 async def add_knowledge(request: Request):
@@ -546,10 +353,12 @@ async def add_knowledge(request: Request):
             return JSONResponse({"error": "Текст слишком короткий"}, status_code=400)
 
         doc_vector = await get_embedding(text)
+        stable_id = hashlib.md5(text.encode()).hexdigest()
+        
         qdrant.upsert(
             collection_name=COLLECTION_NAME,
             points=[models.PointStruct(
-                id=abs(hash(text)) % 1000000000,
+                id=stable_id,
                 vector=doc_vector,
                 payload={"text": text}
             )]
@@ -584,36 +393,35 @@ async def upload_document(file: UploadFile = File(...)):
         current_chunk = ""
         for para in paragraphs:
             para = para.strip()
-            if not para:
-                continue
+            if not para: continue
             if len(current_chunk) + len(para) <= 800:
                 current_chunk += (("\n\n" if current_chunk else "") + para)
             else:
-                if current_chunk:
-                    chunks.append(current_chunk)
+                if current_chunk: chunks.append(current_chunk)
                 if len(para) > 800:
                     for i in range(0, len(para), 700):
                         chunks.append(para[i:i + 800])
                 current_chunk = ""
-        if current_chunk:
-            chunks.append(current_chunk)
+        if current_chunk: chunks.append(current_chunk)
         chunks = [c for c in chunks if len(c.strip()) > 30]
 
         success_count = 0
         for i, chunk in enumerate(chunks):
             try:
                 doc_vector = await get_embedding(chunk)
+                stable_id = hashlib.md5(f"{file.filename}_{i}".encode()).hexdigest()
+                
                 qdrant.upsert(
                     collection_name=COLLECTION_NAME,
                     points=[models.PointStruct(
-                        id=abs(hash(f"{file.filename}_{i}")) % 1000000000,
+                        id=stable_id,
                         vector=doc_vector,
                         payload={"text": chunk, "source_file": file.filename}
                     )]
                 )
                 success_count += 1
             except Exception as e:
-                print(f"⚠️ Пропуск фрагмента {i}: {e}")
+                print(f"️ Пропуск фрагмента {i}: {e}")
 
         return JSONResponse({"status": "success", "message": f"Добавлено {success_count} из {len(chunks)} фрагментов"})
     except Exception as e:
@@ -622,11 +430,6 @@ async def upload_document(file: UploadFile = File(...)):
 
 @app.post("/query")
 async def handle_query(request: Request):
-    """
-    Основной эндпоинт для чата.
-    Принимает JSON: {"user_id": "...", "message": "..."}
-    Возвращает: {"response": "ответ бота"}
-    """
     try:
         body = await request.json()
         message = body.get("message") or body.get("text", "")
@@ -637,8 +440,7 @@ async def handle_query(request: Request):
         return JSONResponse({"response": answer})
     except Exception as e:
         print(f"❌ Ошибка в /query: {e}")
-        traceback.print_exc()
-        return JSONResponse({"error": str(e) or "Внутренняя ошибка сервера"}, status_code=500)
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/get_history")
 async def get_history_endpoint(user_id: str):
@@ -646,14 +448,13 @@ async def get_history_endpoint(user_id: str):
         messages = get_history(user_id, limit=50)
         return JSONResponse({"history": messages})
     except Exception as e:
-        traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/get_all_users")
 async def get_all_users(request: Request):
     verify_admin(request)
     try:
-        records, next_page = qdrant.scroll(collection_name=HISTORY_COLLECTION, limit=300, with_payload=True)
+        records, _ = qdrant.scroll(collection_name=HISTORY_COLLECTION, limit=300, with_payload=True)
         users = {}
         for r in records:
             if r.payload:
@@ -666,7 +467,6 @@ async def get_all_users(request: Request):
         sorted_users = sorted(users.values(), key=lambda x: x["last_activity"], reverse=True)
         return JSONResponse({"users": sorted_users, "total": len(sorted_users)})
     except Exception as e:
-        traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.delete("/delete_user")
@@ -679,18 +479,13 @@ async def delete_user(user_id: str, request: Request):
         )
         return JSONResponse({"status": "success", "message": f"Пользователь {user_id} удален"})
     except Exception as e:
-        traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/get_all_knowledge")
 async def get_all_knowledge(request: Request):
     verify_admin(request)
     try:
-        records, next_page = qdrant.scroll(
-            collection_name=COLLECTION_NAME,
-            limit=500,
-            with_payload=True
-        )
+        records, _ = qdrant.scroll(collection_name=COLLECTION_NAME, limit=500, with_payload=True)
         knowledge_list = []
         for r in records:
             if r.payload:
@@ -713,7 +508,6 @@ async def get_all_knowledge(request: Request):
             "files": list(files_stats.values())
         })
     except Exception as e:
-        traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.delete("/delete_knowledge")
@@ -730,7 +524,6 @@ async def delete_knowledge(request: Request):
         )
         return JSONResponse({"status": "success", "message": f"Знание {knowledge_id} удалено"})
     except Exception as e:
-        traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.delete("/delete_file_knowledge")
@@ -757,12 +550,10 @@ async def delete_file_knowledge(file_name: str, request: Request):
             "message": f"Удалено {len(ids_to_delete)} фрагментов из файла {file_name}"
         })
     except Exception as e:
-        traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
         
 @app.post("/update_system_prompt")
 async def update_system_prompt(request: Request):
-    """Обновляет системный промпт на лету. Требуется x-admin-token."""
     token = request.headers.get("x-admin-token")
     if not ADMIN_TOKEN or token != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Неверный токен администратора")
@@ -776,7 +567,6 @@ async def update_system_prompt(request: Request):
         global SYSTEM_PROMPT
         SYSTEM_PROMPT = new_prompt
         
-        # Сохраняем в файл для сохранения после перезапуска
         with open("system_prompt.txt", "w", encoding="utf-8") as f:
             f.write(new_prompt)
         
