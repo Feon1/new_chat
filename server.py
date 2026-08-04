@@ -191,23 +191,23 @@ async def search_knowledge(query: str) -> str:
         return ""
 
 async def save_to_history(user_id: str, role: str, content: str):
-    """
-    Сохраняет сообщение в историю с защитой от ошибок типов.
-    """
+    """Сохраняет сообщение в историю с надежной защитой от ошибок типов."""
     try:
-        # 1. ЖЕСТКОЕ ПРИВЕДЕНИЕ К СТРОКЕ (исправляет TypeError)
+        # 1. Жесткое приведение всех аргументов к строке
         safe_user_id = str(user_id).strip()
         safe_role = str(role).strip()
         safe_content = str(content).strip() if content is not None else ""
         
-        # Нормализация контента для дедупликации
+        # Нормализация для дедупликации
         normalized_content = ' '.join(safe_content.split())
         
-        # Генерируем UUID v5 из гарантированно строковых данных
+        # Формируем ключ ТОЛЬКО из строк
         content_key = f"{safe_user_id}_{safe_role}_{normalized_content}"
-        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, content_key.encode('utf-8')))
         
-        # Проверка дубликата по ID
+        # Передаем СТРОКУ в uuid5 (не bytes!)
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, content_key))
+        
+        # Проверка дубликата
         existing = await asyncio.to_thread(
             qdrant.retrieve,
             collection_name=HISTORY_COLLECTION,
@@ -216,7 +216,7 @@ async def save_to_history(user_id: str, role: str, content: str):
         )
         
         if existing:
-            print(f"⏭️ Пропускаем дубликат: {safe_content[:30]}...")
+            print(f"️ Пропускаем дубликат: {normalized_content[:30]}...")
             return
 
         # Сохранение
