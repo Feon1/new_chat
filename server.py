@@ -192,19 +192,22 @@ async def search_knowledge(query: str) -> str:
 
 async def save_to_history(user_id: str, role: str, content: str):
     """
-    Сохраняет сообщение в историю.
-    Использует жесткую нормализацию и UUID V5 для дедупликации.
+    Сохраняет сообщение в историю с защитой от ошибок типов.
     """
     try:
-        # ЖЕСТКАЯ НОРМАЛИЗАЦИЯ
-        normalized_content = ' '.join(str(content).split())
-        normalized_user_id = str(user_id).strip()
+        # 1. ЖЕСТКОЕ ПРИВЕДЕНИЕ К СТРОКЕ (исправляет TypeError)
+        safe_user_id = str(user_id).strip()
+        safe_role = str(role).strip()
+        safe_content = str(content).strip() if content is not None else ""
         
-        # Генерируем детерминированный UUID v5
-        content_key = f"{normalized_user_id}_{role}_{normalized_content}"
+        # Нормализация контента для дедупликации
+        normalized_content = ' '.join(safe_content.split())
+        
+        # Генерируем UUID v5 из гарантированно строковых данных
+        content_key = f"{safe_user_id}_{safe_role}_{normalized_content}"
         point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, content_key.encode('utf-8')))
         
-        # Проверка дубликата по ID (мгновенно)
+        # Проверка дубликата по ID
         existing = await asyncio.to_thread(
             qdrant.retrieve,
             collection_name=HISTORY_COLLECTION,
@@ -213,7 +216,7 @@ async def save_to_history(user_id: str, role: str, content: str):
         )
         
         if existing:
-            print(f"⏭️ Пропускаем дубликат: {content[:30]}...")
+            print(f"⏭️ Пропускаем дубликат: {safe_content[:30]}...")
             return
 
         # Сохранение
@@ -227,15 +230,15 @@ async def save_to_history(user_id: str, role: str, content: str):
                 id=point_id,
                 vector=[1.0],
                 payload={
-                    "user_id": normalized_user_id,
-                    "role": role,
+                    "user_id": safe_user_id,
+                    "role": safe_role,
                     "content": normalized_content,
                     "message_hash": content_hash,
                     "timestamp": timestamp
                 }
             )]
         )
-        print(f"✅ История сохранена: {role} ({len(normalized_content)} симв.)")
+        print(f"✅ История сохранена: {safe_role} ({len(normalized_content)} симв.)")
         
     except Exception as e:
         print(f"⚠️ Ошибка сохранения истории: {e}")
