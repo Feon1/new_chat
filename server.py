@@ -26,7 +26,7 @@ except ImportError:
 
 load_dotenv()
 
-app = FastAPI(title="Feon RAG Adapter")
+app = FastAPI(title="Feon RAG Adapter (Telegram + Web)")
 
 # Разрешаем CORS
 app.add_middleware(
@@ -38,7 +38,7 @@ app.add_middleware(
 )
 
 # ==========================================
-# ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ (ТОЛЬКО TG И WEB)
+# ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ И НАСТРОЙКИ
 # ==========================================
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -46,10 +46,14 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+JINA_API_KEY = os.getenv("JINA_API_KEY")
 POLZA_API_KEY = os.getenv("POLZA_API_KEY")
 
-COLLECTION_NAME = "xiaozhi_knowledge"
-HISTORY_COLLECTION = "chat_history"
+# УНИКАЛЬНЫЕ ИМЕНА КОЛЛЕКЦИЙ ДЛЯ TG/WEB
+COLLECTION_NAME = "xiaozhi_knowledge_tg"
+HISTORY_COLLECTION = "chat_history_tg"
+
+JINA_API_URL = "https://api.jina.ai/v1/embeddings"
 
 # Настройки Object Storage (опционально)
 BUCKET_NAME = os.getenv("BUCKET_NAME")
@@ -95,20 +99,20 @@ def verify_admin(request: Request):
 async def startup_event():
     """Создаем коллекции и индексы при запуске"""
     
-    # 1. Коллекция для базы знаний (ВСЕГДА 1536 для Polza AI)
+    # 1. Коллекция для базы знаний (Jina dim=384)
     try:
         info = qdrant.get_collection(COLLECTION_NAME)
-        if info.config.params.vectors.size != 1536:
-            print(f"⚠️ Размерность {info.config.params.vectors.size} != 1536, пересоздаем...")
+        if info.config.params.vectors.size != 384:
+            print(f"️ Размерность {info.config.params.vectors.size} != 384, пересоздаем...")
             qdrant.delete_collection(COLLECTION_NAME)
             raise Exception("Recreate")
-        print(f"✅ Коллекция '{COLLECTION_NAME}' найдена")
+        print(f"✅ Коллекция '{COLLECTION_NAME}' найдена (dim=384)")
     except Exception:
         qdrant.create_collection(
             collection_name=COLLECTION_NAME,
-            vectors_config=models.VectorParams(size=1536, distance=models.Distance.COSINE),
+            vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE),
         )
-        print(f"✅ Коллекция '{COLLECTION_NAME}' создана (dim=1536)")
+        print(f"✅ Коллекция '{COLLECTION_NAME}' создана (dim=384)")
 
     # 2. Коллекция для истории чатов
     try:
@@ -155,12 +159,17 @@ async def startup_event():
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
 async def get_embedding(text: str) -> list[float]:
-    """Получение эмбеддинга через Polza AI (text-embedding-3-small, dim=1536)"""
-    headers = {"Authorization": f"Bearer {POLZA_API_KEY}", "Content-Type": "application/json"}
-    data = {"model": "text-embedding-3-small", "input": [text]}
+    """Получение эмбеддинга через Jina AI (dim=384)"""
+    headers = {"Authorization": f"Bearer {JINA_API_KEY}", "Content-Type": "application/json"}
+    data = {
+        "model": "jina-embeddings-v3", 
+        "input": [text], 
+        "task": "text-matching", 
+        "dimensions": 384
+    }
     
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.post("https://polza.ai/api/v1/embeddings", headers=headers, json=data)
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        response = await client.post(JINA_API_URL, headers=headers, json=data)
         response.raise_for_status()
         return response.json()["data"][0]["embedding"]
 
@@ -183,10 +192,10 @@ async def search_knowledge(query: str) -> str:
 async def save_to_history(user_id: str, role: str, content: str):
     """
     Сохраняет сообщение в историю.
-    ИСПОЛЬЗУЕТ ЖЕСТКУЮ НОРМАЛИЗАЦИЮ И UUID V5 ДЛЯ СИНХРОНИЗАЦИИ С YANDEX CLOUD.
+    Использует жесткую нормализацию и UUID V5 для дедупликации.
     """
     try:
-        # ЖЕСТКАЯ НОРМАЛИЗАЦИЯ: идентичная логика как в Yandex Cloud Functions
+        # ЖЕСТКАЯ НОРМАЛИЗАЦИЯ
         normalized_content = ' '.join(str(content).split())
         normalized_user_id = str(user_id).strip()
         
@@ -244,11 +253,11 @@ def get_history(user_id: str, limit: int = 50) -> list[dict]:
         messages = sorted([r.payload for r in records if r.payload], key=lambda x: x.get("timestamp", ""))
         return messages
     except Exception as e:
-        print(f"️ Ошибка получения истории: {e}")
+        print(f"⚠️ Ошибка получения истории: {e}")
         return []
 
 # ==========================================
-# 🧠 УНИВЕРСАЛЬНОЕ ЯДРО ЧАТА
+# 🧠 ЯДРО ЧАТА
 # ==========================================
 async def process_message_core(user_id: str, text: str) -> str:
     if len(text) > 1000:
@@ -268,7 +277,7 @@ async def process_message_core(user_id: str, text: str) -> str:
         role_name = "Пользователь" if role == 'user' else "Ассистент"
         chat_history_str += f"{role_name}: {msg.get('content', '')}\n"
 
-    context = await search_knowledge(text) if POLZA_API_KEY else ""
+    context = await search_knowledge(text) if JINA_API_KEY else ""
     prompt = ""
     if chat_history_str:
         prompt += f"История диалога:\n{chat_history_str}\n\n"
@@ -296,7 +305,7 @@ async def process_message_core(user_id: str, text: str) -> str:
             response.raise_for_status()
             answer = response.json()["choices"][0]["message"]["content"]
         except Exception as e:
-            print(f"❌ Ошибка Polza API: {e}")
+            print(f" Ошибка Polza API: {e}")
             traceback.print_exc()
             return "Извините, произошла ошибка при обращении к ИИ."
             
@@ -421,7 +430,7 @@ async def upload_document(file: UploadFile = File(...)):
                 )
                 success_count += 1
             except Exception as e:
-                print(f"️ Пропуск фрагмента {i}: {e}")
+                print(f"⚠️ Пропуск фрагмента {i}: {e}")
 
         return JSONResponse({"status": "success", "message": f"Добавлено {success_count} из {len(chunks)} фрагментов"})
     except Exception as e:
