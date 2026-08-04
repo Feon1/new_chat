@@ -335,7 +335,7 @@ async def telegram_webhook(update: dict):
     if "message" in update:
         message = update["message"]
         chat_id = message["chat"]["id"]
-        user_id = f"tg_{chat_id}"
+        user_id = f"tg_{str(message['chat']['id'])}"
         if "text" not in message:
             return {"ok": True}
         text = message["text"].strip()
