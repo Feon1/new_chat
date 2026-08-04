@@ -14,6 +14,7 @@ import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
+
 # Импорт для Object Storage (если используется)
 try:
     import boto3
@@ -31,7 +32,7 @@ app = FastAPI(title="Feon RAG Adapter (Telegram + Web)")
 # Разрешаем CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://feon1.github.io"],  # Явно указываем ваш домен
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
